@@ -1,0 +1,31 @@
+// shadertype=hlsl
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Initial D.	:	28.03.2023 DMY
+//	Last Change :	28.03.2023 DMY
+//
+//	Purpose of this File :	x
+//
+//===========================================================================//
+
+struct PS_INPUT
+{
+    float2	BaseTexCoord			:	TEXCOORD0;
+	float2	ZeroTexCoord			:	TEXCOORD1;
+	float2	BloomTexcoord			:	TEXCOORD2;
+};
+  
+sampler Sampler_DEST		: register(s0);
+sampler Sampler_SRC			: register(s1);
+
+// Entry point
+float4 main(PS_INPUT i) : COLOR
+{
+	float4 f4Color_RT	= tex2D(Sampler_DEST,	i.BaseTexCoord);
+	float4 f4Color_SRC		= tex2D(Sampler_SRC,	i.BaseTexCoord);
+
+	// AlphaBlend + Inv-Subtract Blend
+	float4 f4Result = float4((f4Color_SRC.w * f4Color_SRC.xyz) + (f4Color_SRC.w * f4Color_RT), f4Color_RT.w);
+
+    return f4Result;
+}

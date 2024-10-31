@@ -1,0 +1,35 @@
+//-----------------------------------------------------------------------------
+//	TF_NAV_MESH.VPC
+//
+//	Project script for TF navigation mesh files
+//-----------------------------------------------------------------------------
+
+$Configuration
+{
+	$Compiler
+	{
+		$AdditionalIncludeDirectories	"$BASE;$SRCDIR/game/server/tf/nav_mesh"
+		$SymbolVisibility				"default" 		[$POSIX]
+	}
+}
+
+$Project
+{
+	$Folder	"Source Files"
+	{
+		$Folder "TF"
+		{
+			$Folder	"TF Nav Mesh"
+			{
+				$File	"tf/nav_mesh/tf_nav_area.cpp"
+				$File	"tf/nav_mesh/tf_nav_area.h"
+				$File	"tf/nav_mesh/tf_nav_interface.cpp"
+				$File	"tf/nav_mesh/tf_nav_interface.h"
+				$File	"tf/nav_mesh/tf_nav_mesh.cpp"
+				$File	"tf/nav_mesh/tf_nav_mesh.h"
+				$File	"tf/nav_mesh/tf_nav_mesh_edit.cpp"
+				$File	"tf/nav_mesh/tf_nav_mesh_convert.cpp"
+			}
+		}
+	}
+}

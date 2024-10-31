@@ -1,0 +1,288 @@
+$Macro gigalibloc     "$SRCDIR\game\shared\sdk13-gigalib\src"
+$Macro gigalibbinloc     "$SRCDIR\game\shared\sdk13-gigalib\bin"
+
+$Macro GENERATED_PROTO_DIR "$SRCDIR\game\shared\sdk13-gigalib\src\networking\"
+// $Include "$gigalibloc/../protobuf_builder.vpc"
+$MacroRequired  GENERATED_PROTO_DIR
+
+$CustomBuildStep "proto"
+{
+    $Description    "Running Protocol Buffer Compiler on $(InputFileName)..."
+    $CommandLine    "if not exist $GENERATED_PROTO_DIR mkdir $GENERATED_PROTO_DIR" "\n" \
+                    "$gigalibbinloc\protobuf\protoc.exe --proto_path=$gigalibloc\protobuf\src --proto_path=$(InputDir) --proto_path=$gigalibloc\networking --cpp_out=$GENERATED_PROTO_DIR $(InputPath)" [$WINDOWS]
+
+
+    $CommandLine    "mkdir $GENERATED_PROTO_DIR 2> /dev/null;"  \
+                    "$gigalibbinloc/protobuf/protoc --proto_path=$gigalibloc\protobuf\src --proto_path=$(InputDir) --proto_path=$gigalibloc\networking --cpp_out=$GENERATED_PROTO_DIR $(InputPath)" [$LINUXALL]
+    $Outputs        "$GENERATED_PROTO_DIR\$(InputName).pb.cc;$GENERATED_PROTO_DIR\$(InputName).pb.h"
+}
+
+$Project
+{
+    $Folder "Link Libraries"
+    {
+        // defined in networking.h
+        // $Libexternal    "$gigalibloc\..\bin\libprotobuf"    [$WIN32]
+        $Libexternal    "$gigalibloc\..\bin\libprotobuf"    [$LINUX]
+    }
+}
+
+
+
+$Configuration
+{
+    $Compiler
+    {
+        // https://github.com/microsoft/vcpkg/issues/7936
+        // $DisableSpecificWarnings    "$BASE;4251"
+
+        $AdditionalIncludeDirectories   "$BASE;$gigalibloc"
+
+
+        $AdditionalIncludeDirectories   "$BASE;$gigalibloc/engine_hacks"
+        $AdditionalIncludeDirectories   "$BASE;$gigalibloc/helpers"
+        $AdditionalIncludeDirectories   "$BASE;$gigalibloc/memy"
+        $AdditionalIncludeDirectories   "$BASE;$gigalibloc/polyhook"
+        $AdditionalIncludeDirectories   "$BASE;$gigalibloc/qol"
+        $AdditionalIncludeDirectories   "$BASE;$gigalibloc/sdkCURL"
+        $AdditionalIncludeDirectories   "$BASE;$gigalibloc/sdksentry"
+        $AdditionalIncludeDirectories   "$BASE;$gigalibloc/speedykv"
+
+        $AdditionalIncludeDirectories   "$BASE;$SRCDIR\thirdparty\SDL2" // [$SDL || $DEDICATED]
+
+        // General
+        $AdditionalIncludeDirectories   "$BASE;$GENERATED_PROTO_DIR;$gigalibloc\protobuf\src"
+
+
+        $SymbolVisibility               "default" [$POSIX]
+
+        // Net stuff
+        // PROTOBUF_USE_DLLS
+        $PreprocessorDefinitions        "$BASE;_SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING"
+
+        // $Create/UsePrecompiledHeader "Not Using Precompiled Headers"
+    }
+
+    $Linker
+    {
+        $AdditionalDependencies             "$BASE wsock32.lib" [$WIN32]
+        $AdditionalDependencies             "$BASE ws2_32.lib"  [$WIN32]
+        $AdditionalDependencies             "$BASE wldap32.lib" [$WIN32]
+        // $AdditionalDependencies          "$BASE msvcrtd.lib" [$WIN32]
+    }
+}
+
+
+$Project
+{
+    $Folder "Protobuf Files"
+	{
+		$File "$gigalibloc/networking/messages.proto"
+		$Folder "Generated Files" [!$OSXALL]
+		{
+			$DynamicFile "$gigalibloc/networking/messages.pb.h"
+			$DynamicFile "$gigalibloc/networking/messages.pb.cc"
+			{
+				$Configuration
+				{
+					$Compiler 
+					{
+						$Create/UsePrecompiledHeader	"Not Using Precompiled Headers"
+						$AdditionalOptions				"$BASE /D_HAS_EXCEPTIONS=0"
+					}
+				}
+			}
+		}
+	}
+
+    $Folder "Source Files"
+    {
+        $Folder "sdk13-gigalib"
+        {
+            $Folder "helpers"
+            {
+                $File   "$gigalibloc/helpers/steam_helpers.h"
+                $File   "$gigalibloc/helpers/steam_helpers.cpp"
+
+                $File   "$gigalibloc/helpers/misc_helpers.h"
+                $File   "$gigalibloc/helpers/misc_helpers.cpp"
+
+                $File   "$gigalibloc/helpers/fakeconvar.h"
+                $File   "$gigalibloc/helpers/fakeconvar.cpp"
+
+                $File   "$gigalibloc/helpers/git_banned.h"
+            }
+            $Folder "memy"
+            {
+                $File "$gigalibloc/memy/bytepatch.hpp"
+                $File "$gigalibloc/memy/detourhook.hpp"
+
+                $File "$gigalibloc/memy/memytools.h"
+                $File "$gigalibloc/memy/memytools.cpp"
+
+                $File "$gigalibloc/memy/vtblhook.h"
+            }
+            $Folder "networking"
+            {
+                $File   "$gigalibloc/networking/networking.cpp"
+                $File   "$gigalibloc/networking/networking.h"
+
+                $File   "$gigalibloc/networking/messages.cpp"
+                $File   "$gigalibloc/networking/messages.h"
+            }
+            $Folder "engine hacks"
+            {
+                $File   "$gigalibloc/engine_hacks/engine_detours.cpp"
+                $File   "$gigalibloc/engine_hacks/bin_patch.cpp"
+                $File   "$gigalibloc/engine_hacks/engine_memutils.cpp"
+
+                $File   "$gigalibloc/engine_hacks/engine_detours.h"
+                $File   "$gigalibloc/engine_hacks/bin_patch.h"
+                $File   "$gigalibloc/engine_hacks/engine_memutils.h"
+            }
+
+            $Folder "sentry native"
+            {
+                $File   "$gigalibloc/sdksentry/sdksentry.cpp"
+                $File   "$gigalibloc/sdksentry/sdksentry.h"
+
+                $File   "$gigalibloc/sdksentry/vendored/sentry.h"
+            }
+            $Folder "qol"
+            {
+                $File   "$gigalibloc/qol/flush_downloadables.cpp"
+                $File   "$gigalibloc/qol/flush_downloadables.h"
+
+                $File   "$gigalibloc/qol/blacklists.cpp"
+                $File   "$gigalibloc/qol/blacklists.h"
+            }
+            $Folder "sdkCURL" [$WIN32]
+            {
+                $File   "$gigalibloc/sdkCURL/sdkCURL.cpp"
+                $File   "$gigalibloc/sdkCURL/sdkCURL.h"
+                $File   "$gigalibloc/sdkCURL/vendored/curl.h"
+                $File   "$gigalibloc/sdkCURL/vendored/curlver.h"
+                $File   "$gigalibloc/sdkCURL/vendored/easy.h"
+                $File   "$gigalibloc/sdkCURL/vendored/header.h"
+                $File   "$gigalibloc/sdkCURL/vendored/mprintf.h"
+                $File   "$gigalibloc/sdkCURL/vendored/multi.h"
+                $File   "$gigalibloc/sdkCURL/vendored/options.h"
+                $File   "$gigalibloc/sdkCURL/vendored/stdcheaders.h"
+                $File   "$gigalibloc/sdkCURL/vendored/system.h"
+                $File   "$gigalibloc/sdkCURL/vendored/typecheck-gcc.h"
+                $File   "$gigalibloc/sdkCURL/vendored/urlapi.h"
+                $File   "$gigalibloc/sdkCURL/vendored/websockets.h"
+            }
+            //$Folder "sdknanopb"
+            //{
+            //    $File   "$gigalibloc/sdknanopb/vendored/pb_common.c" \
+            //            "$gigalibloc/sdknanopb/vendored/pb_decode.c" \
+            //            "$gigalibloc/sdknanopb/vendored/pb_encode.c"
+            //    {
+            //        $Configuration
+            //        {
+            //            $Compiler
+            //            {
+            //                $Create/UsePrecompiledHeader    "Not Using Precompiled Headers"
+            //            }
+            //        }
+            //    }
+			//
+            //    $File   "$gigalibloc/sdknanopb/vendored/pb_common.h"
+            //    $File   "$gigalibloc/sdknanopb/vendored/pb_encode.h"
+            //    $File   "$gigalibloc/sdknanopb/vendored/pb.h"
+            //}
+            $Folder "speedykv"
+            {
+                $File   "$gigalibloc/speedykv/speedykv.cpp"
+                {
+                    $Configuration
+                    {
+                        $Compiler
+                        {
+                            $Create/UsePrecompiledHeader    "Not Using Precompiled Headers"
+                        }
+                    }
+                }
+
+                $File   "$gigalibloc/speedykv/speedykv.h"
+            }
+        }
+
+    }
+
+	// $Lib:
+	//   windows:
+	//     if dedicated sv:
+	//       path == <name>_srv.lib
+	//     else:
+	//       path == <name>.lib
+	//   linux:
+	//     if dedicated sv:
+	//       path == <name>_srv.a
+	//     else:
+	//       path == <name>.a
+	// 
+	// $LibExternal:
+	//   windows:
+	//     path == <name>.lib
+	//   linux:
+	//     path == <name>.a
+	// 
+	// $ImpLib:
+	//   windows:
+	//     if dedicated sv:
+	//       path == <name>_srv.lib
+	//     else:
+	//       path == <name>.lib
+	//   linux:
+	//     if dedicated sv:
+	//       path == <name>_srv.so
+	//     else:
+	//       path == <name>.so
+	// 
+	// $ImpLibExternal:
+	//   windows:
+	//     path == <name>.lib
+	//   linux:
+	//     path == <name>.so
+	// 
+	// TLDR:
+	// 
+	// use ImpLib for internally compiled shared libraries
+	// use ImpLibExternal externally compiled shared libraries
+	// 
+	// use Lib for internally compiled static libraries
+	// use LibExternal for externally compiled static libraries
+
+
+
+    $Folder "Link Libraries"
+    {
+        $ImpLib             "$gigalibloc\..\bin\sentry"                     [$WIN32]
+        $ImpLib             "$gigalibloc\..\bin\fmt"                        [$WIN32]
+
+        // sentry
+        $Lib                "$gigalibloc\..\bin\libbreakpad_client"         [$LINUX]
+        $Lib                "$gigalibloc\..\bin\libsentry"                  [$LINUX]
+        // bin patching
+        $Lib                "$gigalibloc\..\bin\libPolyHook_2"              [$LINUX]
+        $Lib                "$gigalibloc\..\bin\libZydis"                   [$LINUX]
+        // fmt
+        $Lib                "$gigalibloc\..\bin\libfmt"                     [$LINUX]
+        // sdl
+        $ImpLibExternal     "$gigalibloc\..\bin\SDL2"                       [$LINUX]
+
+        // curl
+        // $ImpLibExternal      "$gigalibloc\..\bin\libcurl"                [$LINUX]
+        // $Lib                 "$gigalibloc\..\bin\libbrotlicommon-static" [$LINUX]
+        // $Lib                 "$gigalibloc\..\bin\libbrotlidec-static"    [$LINUX]
+        // $Lib                 "$gigalibloc\..\bin\libbrotlienc-static"    [$LINUX]
+        // $Lib                 "$gigalibloc\..\bin\libcrypto"              [$LINUX]
+        // $Lib                 "$gigalibloc\..\bin\libnghttp2"             [$LINUX]
+        // $Lib                 "$gigalibloc\..\bin\libssh2"                [$LINUX]
+        // $Lib                 "$gigalibloc\..\bin\libssl"                 [$LINUX]
+        // $Lib                 "$gigalibloc\..\bin\libz"                   [$LINUX]
+        // $Lib                 "$gigalibloc\..\bin\libzstd"                [$LINUX]
+    }
+}

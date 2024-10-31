@@ -1,0 +1,106 @@
+=====================================================================
+Boolean Constant Registers (vs30)
+=====================================================================
+b0				- g_bLightEnabled[0]
+b1				- g_bLightEnabled[1]
+b2				- g_bLightEnabled[2]
+b3				- g_bLightEnabled[3]
+b4				- SHADER_SPECIFIC_BOOL_CONST_0
+b5				- SHADER_SPECIFIC_BOOL_CONST_1
+b6				- SHADER_SPECIFIC_BOOL_CONST_2
+b7				- SHADER_SPECIFIC_BOOL_CONST_3
+b8				- SHADER_SPECIFIC_BOOL_CONST_4
+b9				- SHADER_SPECIFIC_BOOL_CONST_5
+b10				- SHADER_SPECIFIC_BOOL_CONST_6
+b11				- SHADER_SPECIFIC_BOOL_CONST_7
+=====================================================================
+Integer Constant Registers (vs30)
+=====================================================================
+i0				- g_nLightCountRegister ( apparently only .x )
+
+=====================================================================
+Float Constant Registers (vs30)
+=====================================================================
+c0, signed under #pragma, so probably unusable for whatever reason
+c1	float4		- cConstants1 ( c00Gamma on .x , cOneThird on .z)
+c2	float4		- cEyePosWaterZ
+c3	float4		- cFlexScale ( only .x is used, binary value)
+c4  float4x4	- cModelViewProj
+c5  float4		- cModelViewProj
+c6  float4		- cModelViewProj
+c7  float4		- cModelViewProj
+c8  float4x4	- cViewProj
+c9  float4		- cViewProj
+c10 float4		- cViewProj
+c11 float4		- cViewProj
+c12 			- apparently empty...
+c13 float4		- cModelViewProjZ
+c14				- SHADER_SPECIFIC_CONST_10
+c15				- SHADER_SPECIFIC_CONST_15
+c16 float4		- cFogParams
+c17 float4		- cViewModel
+c18 float4		- cViewModel
+c19 float4		- cViewModel
+c20 float4		- cViewModel
+
+c21 float3		- ambient cube x
+c22 float3		- ambient cube x
+c23 float3		- ambient cube y
+c24 float3		- ambient cube y
+c25 float3		- ambient cube z
+c26 float3		- ambient cube z
+
+Light 0
+c27 float4		- color.xyz - light type.w
+c28 float4		- direc.xyz - light type.w
+c29 float4		- pos
+c30 float4		- spotParams
+c31 float4		- atten
+
+Light 1
+c32 float4		- color.xyz - light type.w
+c33 float4		- direc.xyz - light type.w
+c34 float4		- pos
+c35 float4		- spotParams
+c36 float4		- atten
+
+Light 2
+c37 float4		- color.xyz - light type.w
+c38 float4		- direc.xyz - light type.w
+c39 float4		- pos
+c40 float4		- spotParams
+c41 float4		- atten
+
+c42 float4		- color.xyz - light type.w
+c43 float4		- direc.xyz - light type.w
+c44 float4		- pos
+c45 float4		- spotParams
+c46 float4		- atten
+
+c47 float4		- cModulationColor
+c48				- SHADER_SPECIFIC_CONST_0
+c49				- SHADER_SPECIFIC_CONST_1
+c50				- SHADER_SPECIFIC_CONST_2
+c51				- SHADER_SPECIFIC_CONST_3
+c52				- SHADER_SPECIFIC_CONST_4
+c53				- SHADER_SPECIFIC_CONST_5
+c54				- SHADER_SPECIFIC_CONST_6
+c55				- SHADER_SPECIFIC_CONST_7
+c56				- SHADER_SPECIFIC_CONST_8
+c57				- SHADER_SPECIFIC_CONST_9
+// SHADER_SPECIFIC_CONST 10 and 11 are c14, c15... then you have 12 on c218
+
+c58 float4x3	- cModel ([53])
+c59 ...
+c60 ..
+c216. // Yes, all the way down on dx90. Only to c105 for dx80
+c217			- apparently empty
+c218			- SHADER_SPECIFIC_CONST_12
+
+... Nothing here?
+
+c1024 float4	- cFlexWeights[512] (on vs30)
+...
+..
+.
+c1535			- cFlexWeights end

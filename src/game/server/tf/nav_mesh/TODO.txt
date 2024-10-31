@@ -1,0 +1,70 @@
+TODO TODO TODO
+
+
+ERRORS (as of 20170412)
+================================================================================
+
+pl_goldrush (2), tc_hydro (6), cp_egypt_final (1):
+- assertion failure:
+  'tf_nav_mesh.cpp (809) : Assertion Failed: team >= FIRST_GAME_TEAM && team < TF_TEAM_COUNT'
+  (team == 0)
+
+ctf_2fort (1), dm_ravine (1):
+- assertion failure:
+  'nav_generate.cpp (3261) : Assertion Failed: height == 1'
+
+ctf_import_b5:
+- assertion failure:
+  'particle_property.cpp (148) : Attempting to create unknown particle system'
+  (pDef == nullptr)
+- assertion failure:
+  'clientleafsystem.cpp (1003) : Assertion Failed: m_ShadowsInLeaf.NumAllocated() < 2000'
+
+================================================================================
+
+
+make a test map to verify the following constants!
+(find references where possible)
+
+
+game/server/nav.h:
+-  25.0f GenerationStepSize
+-  41.8f JumpHeight
+-  64.0f JumpCrouchHeight
+-  18.0f StepHeight
+- 400.0f DeathDrop
+- 200.0f ClimpUpHeight
+- 300.0f CliffHeight
+-  16.0f HalfHumanWidth
+-  35.5f HalfHumanHeight
+-  71.0f HumanHeight
+-  62.0f HumanEyeHeight
+-  55.0f HumanCrouchHeight
+-  37.0f HumanCrouchEyeHeight
+
+
+game/server/nav_generate.cpp:
+- convar defaults
+  - 50.0f nav_area_max_size
+  - ...
+- 10.0f MaxTraversableHeight
+
+
+game/server/NextBot/NextBotBodyInterface.h:
+- IBody::GetMaxHeadAngularVelocity
+- 26.0f IBody::GetHullWidth
+- 16.0f IBody::GetHullHeight (*)
+- 68.0f IBody::GetStandHullHeight
+- 32.0f IBody::GetCrouchHullHeight
+
+
+game/server/NextBot/NextBotPlayer/NextBotPlayerLocomotion.h:
+-  57.0f PlayerLocomotion::GetMaxJumpHeight
+- 200.0f PlayerLocomotion::GetDeathDropHeight
+- 100.0f PlayerLocomotion::GetMaxAcceleration
+- 200.0f PlayerLocomotion::GetMaxDeceleration
+
+
+game/server/tf/bot/tf_bot_locomotion.h:
+-   72.0f CTFBotLocomotion::GetMaxJumpHeight
+- 1000.0f CTFBotLocomotion::GetDeathDropHeight

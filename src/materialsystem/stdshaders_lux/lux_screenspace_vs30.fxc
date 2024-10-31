@@ -1,0 +1,54 @@
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Initial D.	:	28.03.2023 DMY
+//	Last Change :	24.05.2023 DMY
+//
+//	Purpose of this File :	VertexShader for vs30, to be used on Screenspace
+//
+//===========================================================================//
+
+// Allows us to use model functions from lux_common_vs_fxc.h
+// #define MODEL
+
+// Include for lux shaders
+#include "lux_common_vs_fxc.h"
+
+//-----------------------------------------------------------------------------
+// Input vertex format
+//-----------------------------------------------------------------------------
+struct VS_INPUT
+{
+    // This is all of the stuff that we ever use
+    float4 vPos                     : POSITION;
+    float2 vTexCoord0               : TEXCOORD0;
+};
+
+struct VS_OUTPUT
+{
+    // Stuff that isn't seen by the pixel shader
+	// This is used by the GPU to determine what's actually rendered on-screen ( The actual screenspace position of our triangles )
+    float4 ProjPosSetup				:	POSITION; 
+
+    // Stuff that is seen by the pixel shader
+    float2	BaseTexCoord		:	TEXCOORD0;
+	float2	ZeroTexCoord		:	TEXCOORD1;
+	float2	BloomTexCoord		:	TEXCOORD2;
+};
+
+float4 Texel_Sizes : register (SHADER_SPECIFIC_CONST_0);
+
+//-----------------------------------------------------------------------------
+// Main shader entry point
+//-----------------------------------------------------------------------------
+VS_OUTPUT main( const VS_INPUT v )
+{
+	VS_OUTPUT o = ( VS_OUTPUT )0;
+	
+	o.ProjPosSetup = float4(v.vPos.xyz, 1.0f);
+	o.BaseTexCoord = v.vTexCoord0;
+	o.ZeroTexCoord=float2(0,0);
+	o.BloomTexCoord.x=v.vTexCoord0.x+Texel_Sizes.z;
+	o.BloomTexCoord.y=v.vTexCoord0.y+Texel_Sizes.w;
+
+    return o;
+}

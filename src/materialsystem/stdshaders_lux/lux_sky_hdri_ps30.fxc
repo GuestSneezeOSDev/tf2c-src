@@ -1,0 +1,387 @@
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Initial D.	:	07.02.2023 DMY
+//	Last Change :	24.05.2023 DMY
+//
+//	Purpose of this File :	PixelShader for ps30, to be used on LUX_SKY_HDRI
+//
+//===========================================================================//
+// This is used to disable features automatically.
+#include "ACROHS_Defines.h"
+
+// This is NOT a Shader used on BRUSHES
+// #define BRUSH
+
+// This is a Shader used on MODELS
+#define MODEL
+
+// This Shaders does NOT use Normalmaps
+//#define NORMALTEXTURE
+
+
+//===========================================================================//
+//	Declare Static Combos
+//===========================================================================//
+// STATIC:	"MODE"				"0..2"
+// STATIC:	"HALF"				"0..1"
+// STATIC:	"STRETCH"			"0..1"
+// STATIC:	"TOSRGB"			"0..1"
+
+//===========================================================================//
+//	Declare Dynamic Combos
+//===========================================================================//
+// DYNAMIC:	"PIXELFOGTYPE"				"0..1"
+// DYNAMIC:	"WRITE_DEPTH_TO_DESTALPHA"	"0..0"
+// DYNAMIC:	"WRITEWATERFOGTODESTALPHA"	"0..0"
+
+// Couldn't define these anywhere else :/ putting them in the header or further below broke them.
+// SKIP: ( $PIXELFOGTYPE == 0 )		&& ( $WRITEWATERFOGTODESTALPHA != 0 )
+
+//===========================================================================//
+//	Include Files ( and with them, function declarations )
+//===========================================================================//
+
+//	This has to be included first. It includes pragmas, #define's, and the register map.
+#include "lux_common_ps_fxc.h"
+
+// lux_common_ps_fxc.h
+// sampler Sampler_BaseTexture		: register(s0);
+#define Sampler_x1y1		(Sampler_BaseTexture)
+sampler Sampler_x2y1		: register(s1);
+sampler Sampler_x3y1		: register(s2);
+sampler Sampler_x4y1		: register(s3);
+sampler Sampler_x1y2		: register(s4);
+sampler Sampler_x2y2		: register(s5);
+sampler Sampler_x3y2		: register(s6);
+sampler Sampler_x4y2		: register(s7);
+
+//===========================================================================//
+//	Everything Vertex Shader is outputting, enters here
+//===========================================================================//
+struct PS_INPUT
+{
+	float4	TexCoords				:	TEXCOORD0; // Unused
+	float4	XYZW					:	TEXCOORD1; // Unused
+	float3	WorldNormal				:	TEXCOORD2; // Unused
+	float3	WorldPos				:	TEXCOORD3;
+	float3	ProjPos					:	TEXCOORD4; // Unused
+	float4	XYZW2					:	TEXCOORD5; // Unused
+	float4	XYZW3					:	TEXCOORD6; // Unused
+	float4	XYZW4					:	TEXCOORD7; // Unused
+};
+ 
+//===========================================================================//
+//	Rendering Start - Entry point
+//===========================================================================//
+float4 main(PS_INPUT i) : COLOR
+{
+	//	Getting our PS_INPUT... TODO/FIXME: Does this require more memory?
+	//===========================================================================//
+	// .xyz's in case we need to pack something later
+ // float3 f3FaceNormal			= i.WorldNormal.xyz;
+	float3 f3WorldPosition		= i.WorldPos.xyz;
+//	float3 f3ProjectPosition	= i.ProjPos.xyz;
+
+	//===========================================================================//
+	//	Rendering, everything that renders
+	//===========================================================================//
+
+	// Lets see where are we looking...
+	float4	f4EyePos	 = g_EyePos;
+	float4	f4HDRFactor	 = float4(g_DiffuseModulation.xyz, 1); // 16.0f when HDR, otherwise 1.0f
+    float3	f3ViewVector = normalize(f4EyePos.xyz - f3WorldPosition); // Lo
+
+	// Convert ViewDirection into polar coordinates ( UV )
+    float theta = acos(f3ViewVector.z);
+    float phi = atan2(f3ViewVector.y, f3ViewVector.x);
+
+    // Convert polar coordinates into UV coordinates
+    float u = phi / (2 * 3.14159265f) + 0.5f;
+    float v = theta / 3.14159265f;
+	float2 UV = float2(u, 1.0f - v); // invert Y
+	float2 UVCompare = UV;
+
+	// Rotating the HDRI is done this way!
+	UV.x += g_DiffuseModulation.w;
+
+	// This is where it gets complicated
+	float4 ReturnValue = float4(0,0,0,0);
+
+	//////////////////////////////
+	//			MODE 0			//
+	//////////////////////////////
+	#if (MODE == 0)
+
+		//////////////////////////////
+		//			HALFED			//
+		//////////////////////////////
+		#if HALF
+			UV.y *= 2.0f;
+		// For Half HDRi's we just cut them in half like so
+		/*
+		 2048x								
+		 ^									2048x
+		 |  +-----------------+				^  +-----------------+
+		 |  |                 |				|  |                 |
+		 |  +-----------------+				|  +-----------------+
+		 |  |                 |				|
+		 |  +-----------------+				|
+		 |									|
+		 +-----------------------> 4096x	+-----------------------> 4096x
+		*/
+		#if STRETCH
+		if(UVCompare.y > 0.5f)
+		{
+			ReturnValue = tex2D(Sampler_x1y1, float2(UV.x, 0.5000f));
+		}
+		else
+		#else
+		// Discard this entire pixel if this is the case.
+			if(UVCompare.y > 0.5f)
+			{
+				ReturnValue = float4(0,0,0,0);			
+			}
+			else
+		#endif
+			{
+				ReturnValue = tex2D(Sampler_x1y1, UV);
+			}
+
+		//////////////////////////////
+		//			 FULL 			//
+		//////////////////////////////
+		#else
+
+		// Full HDRi :
+		/*
+		2048x							
+		^								
+		|  +-----------------+			
+		|  |                 |			
+		|  |                 |			
+		|  |                 |			
+		|  +-----------------+			
+		|								
+		+-----------------------> 4096x
+		*/
+		{
+			ReturnValue = tex2D(Sampler_x1y1, UV);
+		}
+			
+		#endif
+
+	//////////////////////////////
+	//			MODE 1			//
+	//////////////////////////////
+	#elif (MODE == 1)
+
+		UV.x *= 2.0f; // Adjust...
+		//////////////////////////////
+		//			HALFED			//
+		//////////////////////////////
+		#if HALF
+			UV.y *= 2.0f;
+		// For Half HDRi's we just cut them in half like so
+		/*
+		4096x								
+		^									2048x						
+		|  +--------+--------+				^  +--------+--------+
+		|  |        |        |				|  |        |        |
+		|  +--------+--------+				|  +--------+--------+	
+		|  |        |        |				|
+		|  +--------+--------+				|
+		|									|
+		+-----------------------> 8192x	+-----------------------> 8192x
+		*/
+
+		#if STRETCH
+		if(UVCompare.y > 0.5f)
+		{
+			if(UVCompare.x >= 0.4999f)
+				ReturnValue = tex2D(Sampler_x1y1, float2(UV.x, 0.5001f));
+			else
+				ReturnValue = tex2D(Sampler_x2y1, float2(UV.x, 0.5001f));
+		}
+		else
+		#else
+		// Discard this entire pixel if this is the case.
+			if(UVCompare.y > 0.5f)
+			{
+				ReturnValue = float4(0,0,0,0);
+			}
+			else	
+		#endif
+			{
+				// If on the left side of the HDRI
+				if(UVCompare.x >= 0.4999f)
+					ReturnValue = tex2D(Sampler_x1y1, UV);
+				else
+					ReturnValue = tex2D(Sampler_x2y1, UV);
+			}
+		//////////////////////////////
+		//			 FULL 			//
+		//////////////////////////////
+		#else
+
+		// Full HDRi :
+		/*
+		 4096x
+		 ^
+		 |  +--------+--------+
+		 |  |        |        |
+		 |  |        |        |
+		 |  |        |        |
+		 |  +--------+--------+
+		 |   
+		 +-----------------------> 8192x
+		*/
+			// If on the left side of the HDRI
+			if(UVCompare.x >= 0.4999f)
+				ReturnValue = tex2D(Sampler_x1y1, UV);
+			else
+				ReturnValue = tex2D(Sampler_x2y1, UV);
+		#endif
+
+	//////////////////////////////
+	//			MODE 2			//
+	//////////////////////////////
+	#elif (MODE == 2)
+
+		UV.x *= 4.0f; // Adjust...
+		//////////////////////////////
+		//			HALFED			//
+		//////////////////////////////
+		#if HALF
+
+		// For Half HDRi's we just cut them in half like so
+		/*
+		8192x								4096x
+		^									^						
+		|  +----+----+----+----+			|	+----+----+----+----+
+		|  |    |    |    |    |			|	|    |    |    |    |
+		|  +----+----+----+----+			|  	+----+----+----+----+
+		|  |    |    |    |    |			|
+		|  +----+----+----+----+			|
+		|									|
+		+-----------------------> 16384x	+-----------------------> 16384x
+		*/
+		// Discard this entire pixel if this is the case.
+			if(UVCompare.y > 0.5f)
+			{
+				ReturnValue = float4(0,0,0,0);			
+			}
+			else
+			{
+				// Right side first
+				if(UVCompare.x >= 0.75f)
+				{
+					ReturnValue = tex2D(Sampler_x4y1, UV);
+				}
+				else
+				{
+					if(UVCompare.x >= 0.5f)
+					{
+						ReturnValue = tex2D(Sampler_x3y1, UV);
+					}
+					else
+					{
+						if(UVCompare.x >= 0.25f)
+						{
+							ReturnValue = tex2D(Sampler_x2y1, UV);
+						}
+						else
+						{
+							ReturnValue = tex2D(Sampler_x1y1, UV);
+						}
+					}
+				}
+			}
+
+		//////////////////////////////
+		//			 FULL 			//
+		//////////////////////////////
+		#else
+
+		// Full HDRi :
+		/*
+		8192x
+		^
+		|  +--------+--------+--------+--------+
+		|  |        |        |        |        |
+		|  |        |        |        |        |
+		|  |        |        |        |        |
+		|  +--------+--------+--------+--------+
+		|  |        |        |        |        |
+		|  |        |        |        |        |
+		|  |        |        |        |        |
+		|  +--------+--------+--------+--------+
+		|   
+		+------------------------------------------> 16384x
+		*/
+		// Now this is where it gets expensive...
+		// Lets do the upper areas first because they are more likely...
+		if(UVCompare.y >= 0.5f)
+		{
+			// Right side first
+			if(UVCompare.x >= 0.75f)
+			{
+				ReturnValue = tex2D(Sampler_x4y2, UV);
+			}
+			else
+			{
+				if(UVCompare.x >= 0.5f)
+				{
+					ReturnValue = tex2D(Sampler_x3y2, UV);
+				}
+				else
+				{
+					if(UVCompare.x >= 0.25f)
+					{
+						ReturnValue = tex2D(Sampler_x2y2, UV);
+					}
+					else
+					{
+						ReturnValue = tex2D(Sampler_x1y2, UV);
+					}
+				}
+			}
+		}
+		else // X1Y1, X2Y1, X3Y1, X4Y1
+		{
+			// Right side first
+			if(UVCompare.x >= 0.75f)
+			{
+				ReturnValue = tex2D(Sampler_x4y1, UV);
+			}
+			else
+			{
+				if(UVCompare.x >= 0.5f)
+				{
+					ReturnValue = tex2D(Sampler_x3y1, UV);
+				}
+				else
+				{
+					if(UVCompare.x >= 0.25f)
+					{
+						ReturnValue = tex2D(Sampler_x2y1, UV);
+					}
+					else
+					{
+						ReturnValue = tex2D(Sampler_x1y1, UV);
+					}
+				}
+			}
+		} // END .y >.5f else < .5f
+
+		#endif
+	#endif
+
+	#if TOSRGB
+		ReturnValue = pow(ReturnValue, 2.2f);
+	#endif
+
+	// Put tonemapping code here. f4HDRFactor will be tint and HDRFactor. ( 16 if rgba16f. Have to set to 8 manually when using non float rgba16... )
+	// You want to modify ReturnValue, which is the current color of the pixel.
+
+	return f4HDRFactor * ReturnValue;
+}

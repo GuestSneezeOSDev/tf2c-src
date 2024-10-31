@@ -1,0 +1,121 @@
+TheNextBots() refs:
+  (all have been dealt with!)
+
+TheTFBots() refs:
+  CTFPlayer::GetAutoTeam               TheTFBots().RemoveBotFromTeamAndKick
+
+
+// TODO: all refs to ____GameRules()->IsInTraining() [+0x2d4]
+// - 
+
+// TODO: all refs to ____GameRules()->IsInItemTestingMode() [+0x2d8]
+// - 
+
+
+
+TODO: ConVar mp_humans_must_join_team
+- 2-4 refs: CTFGameRules::HandleSwitchTeams
+- 1 ref:    CTFGameRules::Activate
+- 1 ref:    CTFGameRules::LevelShutdown
+- 3 refs:   CTFGameRules::GetAssignedHumanTeam
+
+
+deal with all xrefs to CTFGameRules::GetAssignedHumanTeam
+ - CreateBotName
+ - CTFBotManager::IsAllBotTeam
+ - CTFPlayer::StateThinkWELCOME
+ - CTFPlayer::HandleCommand_JoinTeam
+
+
+Find all xrefs to CTFBot_____ in other game code (e.g. CTFBotHintSentrygun in CObjectSentrygun::Killed)
+
+
+Find all string refs to bot-related entity classnames
+
+
+TheNextBots().OnWeaponFired
+===========================
+
+Live TF2 callers:
+- CTFGameStats::Event_PlayerFiredWeapon
+- CTFPlayerShared::FadeInvis
+
+TF2 Classic has these useful funcs:
+- CTFGameStats::Event_PlayerFiredWeapon
+- CTFPlayer::NoteWeaponFired (which calls Event_PlayerFiredWeapon)
+but not everything calls these funcs
+
+
+Live TF2 callers of CTFPlayer::NoteWeaponFired:
+- FX_FireBullets
+- CTFFlameThrower::PrimaryAttack
+- CPasstimeGun::Throw
+Live TF2 callers of CTFGameStats::Event_PlayerFiredWeapon:
+- CTFWeaponBaseGun::PrimaryAttack
+- CTFWeaponBaseMelee::PrimaryAttack
+- CTFWeaponBaseMelee::Swing
+- CTFBat_Wood::LaunchBallThink
+- CTFCompoundBow::LaunchGrenade
+- CTFFists::Punch
+- CTFFlameThrower::PrimaryAttack
+- CTFGrenadeLauncher::LaunchGrenade
+- CTFKnife::PrimaryAttack
+- CTFMechanicalArm::PrimaryAttack
+- CTFParticleCannon::FireChargedShot
+- CTFPipebombLauncher::LaunchGrenade
+- (and then CTFPlayerShared::FadeInvis of course)
+
+
+So we need to go through all weapons (in-game) and ensure that they call
+TheNextBots().OnWeaponFired (preferably exactly once)
+
+===========================
+
+
+
+
+Most urgent stuff to implement to get to a testable state [20161031]
+====================================================================
+PathFollower::Avoid
+ChasePath::PredictSubjectPosition
+ChasePath::dword_0x47fc (name and initializer)
+CTFBotMainAction::SelectTargetPoint
+CTFBotMainAction::FireWeaponAtEnemy
+CTFBotTacticalMonitor::Update
+CTFBotTacticalMonitor::AvoidBumpingEnemies
+CTFBotTacticalMonitor::MonitorArmedStickybombs
+CTFBot::<everything>
+...
+Then, deal with Asserts for unimplemented stuff as they come up
+
+
+#####################################
+TODO: EVERYTHING IN TF_BOT_TEMP.CPP/H
+#####################################
+
+
+NextBotCombatCharacter stuff
+============================
+- NextBotGroundLocomotion (server/NextBot/NextBotGroundLocomotion.{cpp,h})
+- CTFBaseBoss
+- DirectChasePath...?
+
+
+CLIENT STUFF
+============
+
+VPC for client NextBot? Are there any refs in the SDK VPCs etc? Included in main NextBot VPC, even?
+
+File: game/client/NextBot/C_NextBot.cpp
+File: game/client/NextBot/C_NextBot.h
+File: game/client/tf/bot_npc/map_entities/c_tf_bot_hint_engineer_nest.cpp
+
+class C_NextBotManager
+- appears to consist of a CUtlVector<C_NextBotCombatCharacter *> and nothing else (not even a vtable)
+function TheClientNextBots() with static 'manager'
+
+class C_NextBotCombatCharacter
+datadesc DT_NextBot
+recvprop DT_NextBot
+
+virtual func C_BaseEntity::IsNextBot

@@ -1,0 +1,10 @@
+[auth]
+# just so you know, sentry has an audit log, and i see everything.
+# don't try being funny. you cant even do anything naughty with this,
+# but dont try it anyway. thanks
+# -sappho
+token=27cc43ac9e02440d9671e2729aa2e050338ae814fd7f48b386257ffc9abf2877
+
+[defaults]
+project=tf2c
+org=sdk13s

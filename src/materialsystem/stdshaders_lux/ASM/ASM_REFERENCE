@@ -1,0 +1,149 @@
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Description :	What is this?
+//					This is a total rewrite of the SDK Shaders.
+//					Under the prefix of lux_ shaders.
+//					The goal is to make the most possible combinations work,
+//					add new parameters and functionality and...
+//					Most importantly.-Decrease Compile times. A lot.
+//					For ACROHS specifically, we also add CSM support.
+//					This nukes ps20b and below. No Linux support.
+//
+//	Initial D.	:	13.05.2023 DMY
+//	Last Change :	13.05.2023 DMY
+//
+//	Purpose of this File :	Reference for ASM instructions
+//
+//===========================================================================//
+
+How does Assembly work? ( The Syntax, of ps30 specifically. )
+You have following setup for each instruction
+
+Operation		Result		Value1		Value2
+				
+The resulting address will be Value1, Value2 after the instruction is run.
+
+Think of it like this :
+
+Value1		Value2
+  |			  |
+  |			  |
+  +-Operation-+
+		|
+		|
+		+- Result
+
+So here is a chart of what operation does what
+
+  Operation  |	Description
+-------------+------------------------------------------------------------------------------------------+
+     MOV     |	Moves from Value1 to Result. Usually done when Swivel is used or vertex shader input
+	 ADD	 |	Addition and Subtraction. In  second case a value will be negated.
+	 MUL	 |	Multiplication
+	 MAD	 |	Multiplication and ADD in one instruction. This is to preserve floating point precision.
+	 RCP	 |	Reciprocal, that's 1 / x. This is used for division. It will do x * ( 1 / y )
+	 LRP	 |	Dedicated Lerp function. This just does x + s * ( y - x ) in one instruction
+	 DP2ADD  |	Dot product with float2's then adds
+	 DP3	 |	Dot product with float3
+	 DP4	 |	Dot product with float4
+	 MIN	 |	returns the smaller from the two. ( Whichever value is smaller than the other will be returned )
+	 MAX	 |	returns the bigger  from the two. ( Whichever value is bigger  than the other will be returned )
+	 RSQ	 |	returns the square root of the number. When doing rsqrt() it will afterwards RCP the value.
+	 EXP	 |	exp2() of the value
+	 LOG	 |	logorithmus of the value
+	 SIN	 |	Self Explanatory
+	 COS	 |	Self Explanatory
+	 TEXLD	 |	Fetches texel from texture memory
+	 DDX	 |	partial derivatives of the value
+	 DDY	 |	partial derivatives of the value
+	 
+	 
+	 
+Here is what the compiler ( should ) spit out if you do these operations without anything extra.
+
+    Calculation   	|    Result ( R ) ( temporary result R2 )
+--------------------+-------------------------------------------------------
+	a + b * c		|	MAD R b c a
+					|
+	a * b + c		|	MAD R a b c
+					|
+	a * b * c		|	MUL R A B -- MUL R R C			
+					|
+	a * b / c		|	MUL R R b -- RCP R2 c -- MUL R R2 a
+					|
+	a / b * c		|	RCP R B -- MUL R R A -- MUL R R C
+					|
+dot(a, b) 2xfloat3	|	DP3 R a b
+					|
+	a1 * b1 +		|	
+	a2 * b2 +		|	DP3 R a.123 b.123
+	a3 * b3			|
+					|
+dot(a, b) 2xfloat2	|	DP2ADD R a b 0.0f
+					|
+
+					|
+
+					|
+
+					|
+
+					|
+
+					|
+
+					|
+
+					|
+
+					|
+
+					|
+
+					|
+
+					|
+					
+					
+					
+					
+					
+					
+					
+					
+					
+You should always convert these ( left ) to these counter parts ( right )
+As it will make it less instructions ( and faster )
+
+ADD, MUL						MAD
+x * (1.0f - x)			->		x - x * x
+
+ADD, MUL						MAD
+x * (y + 1.0f)			->		x * y + x
+
+ADD, ADD, MUL					ADD, MAD
+(x + c) * (x - c)		->		x * x + (-c * c)
+
+ADD, RCP, MUL			->		RCP MAD (?)
+(x + a) / b				->		x * ( 1.0f / b ) + ( a / b )
+
+MUL, MUL, ADD, ADD				MAD, MAD
+x += a * b + c * d		->		x += a*b;
+								x += c*d;
+								
+todo confirm the following RCP instructions on whats going on.
+ADD, RCP, MUL					
+a / (x + b)				->		rcp(  x * (1.0f/a) + (b/a)  )
+
+					
+a / (x * b)				->		rcp(x) * (a/b)
+								rcp(x*/b/a)) alternative?
+MAD, RCP, MUL				
+a / (x * b + c)			->		rcp(  x * (b/a) + (c/a)  )
+						
+ADD, RCP, MUL											
+(x + a) / x				->		1.0f + a * rcp(x)
+
+
+(x * a + b) / x			->		a + b * rcp(x)								
+								

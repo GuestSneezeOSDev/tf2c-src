@@ -1,0 +1,118 @@
+# copied from Open Fortress's CI/CD, by sappho.io etc
+
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+  GIT_STRATEGY: fetch
+  GIT_CLEAN_FLAGS: none
+
+workflow:
+  rules:
+    # skip running on commits with "ci skip" in them
+    - if: $CI_COMMIT_TITLE =~ /.*ci skip.*/i
+      when: never
+
+    # dont run duplicate pipelines
+    - if: ( $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE != 'merge_request_event' )
+      when: never
+
+    - if: $CI_COMMIT_TITLE =~ /.*ci clean.*/i
+      variables:
+        GIT_STRATEGY: clone
+        GIT_CLEAN_FLAGS: -ffdx
+
+    # run on main and devel ALWAYS, and forcibly clean them
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"
+      when: always
+
+    # only run on mrs if not on main / dev
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: always
+
+    # dont run anywhere else
+    - when: never
+
+stages:
+  - linux-build
+#  - linux-sentry-upload
+  - win32-build
+  - win32-sentry-upload
+
+linux-rel-build:
+  stage: linux-build
+  interruptible: true
+  needs: []
+  script:
+    - bash ./build/linux-build.sh
+    - ls -la
+  artifacts:
+    paths:
+      - ./game/tf2classic/bin/server.so
+      - ./game/tf2classic/bin/server.so.dbg
+      - ./game/tf2classic/bin/vscript.so
+      - ./game/tf2classic/bin/vscript.so.dbg
+    expire_in: 1 day
+
+  tags:
+    - shell
+
+linux-dbg-build:
+  stage: linux-build
+  interruptible: true
+  needs: []
+  when: manual
+  allow_failure: false
+  script:
+    - dbg="yes" bash build/linux-build.sh clean && dbg="yes" bash build/linux-build.sh
+    - ls -la
+  tags:
+    - shell
+
+# linux-sentry-upload:
+#   stage: linux-sentry-upload
+#   interruptible: true
+#   when: manual
+#   variables:
+#     GIT_STRATEGY: none
+#   needs: [linux-dbg-build,linux-rel-build]
+#   script:
+#     - cd ./build/sentry/
+#     - chmod +x * -v
+#     - bash ./sentry_upload.sh
+#   tags:
+#   - shell
+
+win32-build:
+  stage: win32-build
+  interruptible: true
+  needs: []
+  before_script:
+    - dir
+  script:
+   - .\build\build-win32.bat
+  artifacts:
+    paths:
+      - ./game/tf2classic/bin/client.pdb
+      - ./game/tf2classic/bin/client.dll
+      - ./game/tf2classic/bin/server.pdb
+      - ./game/tf2classic/bin/server.dll
+      - ./game/tf2classic/bin/game_shader_dx9.pdb
+      - ./game/tf2classic/bin/game_shader_dx9.dll
+      - ./game/tf2classic/bin/vscript.pdb
+      - ./game/tf2classic/bin/vscript.dll
+    expire_in: 3 days
+
+  tags:
+    - win32
+
+win32-sentry-upload:
+  stage: win32-sentry-upload
+  interruptible: true
+  when: manual
+  variables:
+    GIT_STRATEGY: none
+  needs: [win32-build]
+  script:
+   - cd .\build\sentry\
+   - .\sentry_upload.bat
+  tags:
+    - win32

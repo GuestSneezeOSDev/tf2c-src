@@ -1,0 +1,344 @@
+// shadertype=hlsl
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Initial D.	:	23.01.2023 DMY
+//	Last Change :	24.05.2023 DMY
+//
+//	Purpose of this File :	PixelShader for ps30, to be used on LUX_LightMappedGeneric
+//
+//===========================================================================//
+
+//===========================================================================//
+//	Declare Static Combos
+//===========================================================================//
+// STATIC:	"ENVMAPMODE"				"0..2" // CUBEMAPS 2 0
+// STATIC:	"PCC"						"0..1" // PARALLAXCORRECTEDCUBEMAPS 1 0
+// STATIC:	"ENVMAPFRESNEL"				"0..1" // CUBEMAPS_FRESNEL 1 0
+// STATIC:	"SELFILLUMMODE"				"0..3" // SELFILLUMTEXTURING 3 2
+// STATIC:	"DETAILTEXTURE"				"0..1" // DETAILTEXTURING 1 0
+// STATIC:	"BLENDTINTBYBASEALPHA"		"0..1" // BASETINTINGVIAALPHA 1 0
+// STATIC:	"DESATURATEBYBASEALPHA"		"0..1"
+// STATIC:	"PARALLAX"					"0..1" // PARALLAX_MAPPING 1 0
+
+//===========================================================================//
+//	Declare Dynamic Combos
+//===========================================================================//
+// DYNAMIC:	"PIXELFOGTYPE"				"0..1"
+// DYNAMIC:	"WRITEWATERFOGTODESTALPHA"	"0..1"
+
+//===========================================================================//
+//	Skipping combos that are unneeded
+//	GIGA IMPORTANT :	The order of the STATIC:'s and the order of the skips
+//						will DRASTICALLY affect compiletime!
+//	ShiroDkxtro2 :		Compiled this in 141 seconds 8x@4.1GHz
+//===========================================================================//
+// SKIP: ( $ENVMAPMODE == 0				&&	$PCC == 1 )
+// SKIP: ( $ENVMAPMODE == 0				&&	$ENVMAPFRESNEL == 1)
+// SKIP: ( $ENVMAPMODE != 2				&&	$SELFILLUMMODE == 2 )
+// SKIP: ( $SELFILLUMMODE == 1			&&	$BLENDTINTBYBASEALPHA != 0 )
+// SKIP: ( $BLENDTINTBYBASEALPHA != 0	&&	$DESATURATEBYBASEALPHA != 0 )
+// SKIP: ( $PIXELFOGTYPE == 0			&&	$WRITEWATERFOGTODESTALPHA != 0 )
+//===========================================================================//
+//	Include Files ( and with them, function declarations )
+//===========================================================================//
+
+// This is used to disable features automatically.
+#include "ACROHS_Defines.h"
+
+// This IS a Shader used on BRUSHES
+#define BRUSH
+
+// Can use Seamless Texturemapping
+#define SEAMLESS
+
+// This is NOT a Shader used on MODELS
+//#define MODEL
+
+// This Shaders does NOT use Normalmaps, except we need it for Parallax.
+#if PARALLAX
+#include "lux_common_parallax.h"
+#define NORMALTEXTURE
+#endif
+
+//	This has to be included first. It includes pragmas, #define's, and the register map.
+#include "lux_common_ps_fxc.h"
+// Lightmapping related functions
+#include "lux_common_lightmapped.h"
+// SelfIllum Data
+#include "lux_common_selfillum.h"
+// EnvMapping Data
+#include "lux_common_envmap.h"
+
+//===========================================================================//
+//	Everything Vertex Shader is outputting, enters here
+//===========================================================================//
+struct PS_INPUT
+{
+    float4	BaseDetailTexCoord		:	TEXCOORD0;
+#if (ENVMAPMODE == 2)
+	float4	NormalEMMTexCoord		:	TEXCOORD1;
+#endif
+	float3	WorldNormal				:	TEXCOORD2;
+	float3	WorldPos				:	TEXCOORD3;
+	float3	ProjPos					:	TEXCOORD4;
+	float4	LightmapTexCoord1And2	:	TEXCOORD5;
+	float4	LightmapTexCoord3		:	TEXCOORD6;
+	float4	SeamlessWCoordinates	:	TEXCOORD7; // UVW.z coordinates for Seamless Mapping
+	float4	SeamlessWeights			:	COLOR0; // .w unused
+};
+ 
+//===========================================================================//
+//	Rendering Start - Entry point
+//===========================================================================//
+float4 main(PS_INPUT i) : COLOR
+{
+	//	Getting our PS_INPUT
+	//===========================================================================//
+	// Integer Constants are for use with loops only...
+	int iDetailBlendMode = trunc(f1DetailBlendMode);
+
+	float3 f3BaseTextureUV = float3(i.BaseDetailTexCoord.xy, i.SeamlessWCoordinates.x);
+
+	#if DETAILTEXTURE
+	float3 f3DetailTextureUV = float3(i.BaseDetailTexCoord.zw, i.SeamlessWCoordinates.y);
+	#endif
+
+	#if (ENVMAPMODE == 2)
+	float3 f3EnvMapMaskUV = float3(i.NormalEMMTexCoord.zw, i.SeamlessWCoordinates.w);
+	#endif
+
+	// .xyz's in case we need to pack something later
+    float3 f3FaceNormal			= i.WorldNormal.xyz;
+	float3 f3WorldPosition		= i.WorldPos.xyz;
+	float3 f3ProjectPosition	= i.ProjPos.xyz;
+	float2 f2LightmapUV			= i.LightmapTexCoord1And2.xy; // TODO: figure out what the heck is AA_CLAMP supposed to do
+	float4 f4SeamlessWeights	= i.SeamlessWeights;
+	float3 f3ViewVector			= normalize(g_EyePos.xyz - f3WorldPosition); // Lo
+
+#if PARALLAX
+	// THIS BLOWS! This is instructions for a BUMPED shader and we have to do it here for parallax mapping.
+	// This shader should never have had it to begin with, but otherwise we can't do it.
+	// 2023 and we still have surfaces without bumpmaps. I should have bound the default flat bumpmap instead...
+    float3	f3SurfaceTangent;
+    float3	f3SurfaceBase; 
+    float	f1FlipSign;
+    float3x3 f3x3NormalBasis = Compute_Tangent_Frame(f3FaceNormal, f3WorldPosition, f3BaseTextureUV.xy , f3SurfaceTangent, f3SurfaceBase, f1FlipSign);
+
+	float3 f3RelativeViewDirection	=	float3(	dot(f3ViewVector, f3SurfaceTangent),	dot(f3ViewVector, f3SurfaceBase),	dot(f3ViewVector, f3FaceNormal));
+	f3RelativeViewDirection = normalize(f3RelativeViewDirection);
+	// POM
+	float2 Offset = ParallaxOcclusionMapping(f3BaseTextureUV.xy, f3RelativeViewDirection, Sampler_ParallaxMap, f1ParallaxHeight, f1ParallaxMaxOffset, 16, 0);
+
+	// PIM
+//	float2 Offset = ParallaxIntervalMapping(f3RelativeViewDirection, f1ParallaxHeight, f1ParallaxMaxOffset, Sampler_ParallaxMap, f3BaseTextureUV.xy, 16, 1);
+
+	f3BaseTextureUV.xy += Offset;
+	#if (ENVMAPMODE == 2)
+		f3EnvMapMaskUV.xy += Offset;
+	#endif
+
+	#if DETAILTEXTURE
+		f3DetailTextureUV.xy += Offset;
+	#endif
+#endif
+
+	//===========================================================================//
+	//	Getting the current Pixels Color from the Samplers
+	//===========================================================================//
+		float4 f4BaseTexture;
+		if(bSeamless_Base)
+		{
+			f4BaseTexture	= tex2D_Seamless(Sampler_BaseTexture, f3BaseTextureUV, f4SeamlessWeights);	
+		}
+		else
+		{
+			f4BaseTexture	= tex2D(Sampler_BaseTexture, f3BaseTextureUV.xy);	
+		}
+	//		( not on this shader	  ) Sampler_BaseTexture2
+	//		( not on this shader	  ) Sampler_NormalTexture
+	//		( not on this shader	  ) Sampler_NormalTexture2
+	#if DETAILTEXTURE
+		float4	f4DetailTexture;
+		if(bSeamless_Detail)
+		{
+			f4DetailTexture	= tex2D_Seamless(Sampler_DetailTexture, f3DetailTextureUV, f4SeamlessWeights);	
+		}
+		else
+		{
+			f4DetailTexture	= tex2D(Sampler_DetailTexture, f3DetailTextureUV.xy);
+		}
+	#endif
+
+	float3	f3LightMap		= tex2D(Sampler_LightMap, f2LightmapUV).xyz * f3Modul;
+
+	#if (SELFILLUMMODE == 1 || SELFILLUMMODE == 3)
+		float4 f4SelfIllum;
+		if(bSeamless_Base)
+		{
+			f4SelfIllum		= tex2D_Seamless(Sampler_SelfIllum, f3BaseTextureUV, f4SeamlessWeights);
+		}
+		else
+		{
+			float4	f4SelfIllum		= tex2D(	Sampler_SelfIllum,	f3BaseTextureUV.xy);		
+		}					
+	#endif
+
+	//===========================================================================//
+	//	Adding tints when possible
+	//===========================================================================//
+
+	#if BLENDTINTBYBASEALPHA
+	// Same as VertexLitGeneric...
+	float3	f4TintedBaseTexture	= f4BaseTexture.xyz * f3BaseTextureTint;
+			f4TintedBaseTexture	= lerp(f4TintedBaseTexture, f3BaseTextureTint, f1BlendTintFactor);
+			f4BaseTexture.xyz	= lerp(f4BaseTexture.xyz, f4TintedBaseTexture, f4BaseTexture.w);
+	#else
+			f4BaseTexture.xyz *= f3BaseTextureTint;
+		#if DESATURATEBYBASEALPHA
+			float3	f3DesaturatedBaseAlpha = dot(f4BaseTexture.xyz, f3LumCoefficients);
+					f4BaseTexture.xyz = lerp(f4BaseTexture.xyz, f3DesaturatedBaseAlpha, f1DesaturationFactor);
+		#endif
+	#endif
+
+	#if (SELFILLUMMODE == 3)
+	f4SelfIllum.xyz *= f3SelfIllumTint;
+	#endif
+
+#if DETAILTEXTURE
+	f4DetailTexture.xyz *= f3DetailTextureTint;
+	f4BaseTexture = TextureCombine( f4BaseTexture, f4DetailTexture, iDetailBlendMode, f1DetailBlendFactor );
+#endif
+
+    float4 f4Result = {0.0f, 0.0f, 0.0f, 0.0f};
+	
+	float	f1NdotV		 = max(0, dot(f3FaceNormal, f3ViewVector)); // cosLo
+
+#if !PARALLAX
+if (bLightWarpTexture)
+{
+	f3LightMap = 2.0f * tex2D(Sampler_LightWarpTexture, float2( 0.5f * length(f3LightMap) , 0 ));
+}
+#endif
+	
+	f4Result.xyz = f4BaseTexture.xyz * f3LightMap;
+
+	// Are we supposed to render a Cubemap?
+#if (ENVMAPMODE > 0)
+		#if (ENVMAPMODE == 2) // $EnvMapMask
+			float4	f4EnvMapMask;
+			if(bSeamless_EnvMapMask)
+			{
+				f4EnvMapMask	= tex2D_Seamless(Sampler_EnvMapMask, f3EnvMapMaskUV, f4SeamlessWeights);	
+			}
+			else
+			{
+				f4EnvMapMask	= tex2D(Sampler_EnvMapMask, f3EnvMapMaskUV.xy);
+			}
+			float3 f3CubemapMask = f4EnvMapMask.xyz;
+		#else
+			float3 f3CubemapMask = lerp(float3(1.0f, 1.0f, 1.0f), f4BaseTexture.www, f1LerpBaseAlpha); 
+		#endif
+
+		// A better reflection vector...
+		float3 f3ReflectionVector = reflect(f3ViewVector, f3FaceNormal);
+
+#if (PCC == 1) // Are we doing Parallax Correction?
+        //	Parallax correction (2_0b and beyond)
+        //	Adapted from http://seblagarde.wordpress.com/2012/09/29/image-based-lighting-approaches-and-parallax-corrected-cubemap/
+        float3 f3PositionLS = mul(float4(f3WorldPosition, 1), f4x3CorrectionMatrix);
+
+        //	Not Tottery Magic Code
+        //	float3	f3RayLS = mul(f3ReflectionVector, (float3x3) f4x3CorrectionMatrix);
+        //	Tottery's Magic Code
+		//	TODO: This uses a f4x3 but it should be using a float f3x3
+		//	TODO: Stuff pos in the alpha if it isn't actually being used anyways.
+        float3	f3RayLS = mul(float4(f3ReflectionVector, 0.0f), f4x3CorrectionMatrix);
+        float3	f3FirstPlaneIntersect = (float3(1.0f, 1.0f, 1.0f) - f3PositionLS) / f3RayLS;
+        float3	f3SecondPlaneIntersect = (-f3PositionLS) / f3RayLS;
+        float3	f3FurthestPlane = max(f3FirstPlaneIntersect, f3SecondPlaneIntersect);
+        float	f1Distance = min(f3FurthestPlane.x, min(f3FurthestPlane.y, f3FurthestPlane.z));
+
+        // Use distance in WS directly to recover intersection
+        float3 f3IntersectPositionWS = f3WorldPosition + f3ReflectionVector * f1Distance;
+
+        f3ReflectionVector = f3IntersectPositionWS - f3CubeMapPos;
+
+		// Lookup the Texture using f3ReflectionVector as the VectorUV for the Cubemap. ( which pixel it points at)
+        float4 f4SpecularUV = float4(f3ReflectionVector, ENVMAPLOD);
+        float3 f3SpecularLookUp = ENV_MAP_SCALE * texCUBE(Sampler_EnvironmentMap, f4SpecularUV).xyz;
+
+#else
+
+		// Lookup the Texture using f3ReflectionVector as the VectorUV for the Cubemap. ( which pixel it points at)
+        float4 f4SpecularUV = float4(f3ReflectionVector, ENVMAPLOD);
+		float3 f3SpecularLookUp = ENV_MAP_SCALE * texCUBE(Sampler_EnvironmentMap, f4SpecularUV).xyz;
+
+#endif
+
+		f3SpecularLookUp *= lerp(f3CubemapMask, 1.0f - f3CubemapMask, f1EnvMapMaskFlip);
+
+		f3SpecularLookUp *= f3EnvMapTint;
+		float3 f3LookupHighSaturated = f3SpecularLookUp * f3SpecularLookUp;
+		f3SpecularLookUp = lerp( f3SpecularLookUp, f3LookupHighSaturated, f1EnvMapContrast );
+
+		// If you are curious this has to do with perception.
+		float3 f3DesaturatedCubemap = dot( f3SpecularLookUp, float3( 0.299f, 0.587f, 0.114f ) );
+		f3SpecularLookUp = lerp( f3DesaturatedCubemap, f3SpecularLookUp, f3EnvMapSaturation );
+
+#if ENVMAPFRESNEL
+
+	// TODO: Consider doing Unreal Engine Fresnel based on Envmapmask
+	float f1Fresnel = 1.0f - f1NdotV;
+	f1Fresnel = f1EnvMapFresnelScale * pow( f1Fresnel, f1EnvMapFresnelExponent) + f1EnvMapFresnelBias;
+	f3SpecularLookUp *= f1Fresnel;
+
+#endif
+
+	f4Result.xyz += lerp(f3SpecularLookUp, f3SpecularLookUp * saturate(f3LightMap), f1EnvMapLightScale);
+#endif // End Cubemap
+
+    float f1FogFactor = CalcPixelFogFactor(PIXELFOGTYPE, g_FogParams, g_EyePos.xyz, f3WorldPosition, f3ProjectPosition.z);
+
+#if WRITEWATERFOGTODESTALPHA && (PIXELFOGTYPE == PIXEL_FOG_TYPE_HEIGHT)
+    float f1Alpha = f1FogFactor;
+#else
+    float f1Alpha = f4BaseTexture.a;
+#endif // WRITEWATERFOGTODESTALPHA && (PIXELFOGTYPE == PIXEL_FOG_TYPE_HEIGHT)
+
+	// Cannot do bDepthToDestAlpha && (WRITEWATERFOGTODESTALPHA == 0)
+	// Boolean Registers may only be used in If-Statements!!!
+    bool bWriteDepthToAlpha = (WRITEWATERFOGTODESTALPHA == 0);
+	if(!bDepthToDestAlpha)
+	{
+		bWriteDepthToAlpha = false;
+	}
+
+#if DETAILTEXTURE
+	f4Result.xyz = TextureCombinePostLighting( f4Result.xyz, f4DetailTexture, iDetailBlendMode, f1DetailBlendFactor ); // $detail, $detailblendmode $detailblendfactor
+#endif
+
+#if (SELFILLUMMODE == 1) // Basealpha Selfillum and mask texture
+			f4SelfIllum.xyz = lerp( f4BaseTexture.aaa, f4SelfIllum.xyz, f1SelfIllumMaskFactor);
+			f4Result.xyz = lerp(f4Result.xyz, f4BaseTexture.xyz * f3SelfIllumTint, f4SelfIllum.xyz);
+#elif ((SELFILLUMMODE == 2) && (ENVMAPMODE == 2))
+			f4Result.xyz = lerp(f4Result.xyz, f4BaseTexture.xyz * f3SelfIllumTint ,f4EnvMapMask.w);
+#elif (SELFILLUMMODE == 3)
+			f4Result.xyz += f4SelfIllum.xyz;
+#endif // Selfillummode
+
+	// $VertexColor
+	// Only when not seamless !
+	if(bVertexColor)
+	{
+		f4Result.xyz *= i.SeamlessWeights.xyz;
+	}
+
+	// $VertexAlpha
+//	if(bVertexAlpha)
+	{
+		f1Alpha *= i.SeamlessWeights.w;
+	}
+
+// Result must be f4 because of DetailTextureCombine
+    return FinalOutput(float4(f4Result.xyz, f1Alpha), f1FogFactor, PIXELFOGTYPE, TONEMAP_SCALE_LINEAR, bWriteDepthToAlpha, f3ProjectPosition.z);
+}

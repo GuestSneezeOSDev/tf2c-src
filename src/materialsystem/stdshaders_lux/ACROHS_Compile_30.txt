@@ -1,0 +1,66 @@
+//
+// vs 3.0   ps 3.0   shaders collection
+//
+//  These shaders are forced to compile as shader model 3.0
+//  using the new compiler.
+//	    _ps30.vcs
+//	    _vs30.vcs
+//
+//	ShiroDkxtro2 :	You must add the filename WITH extension. Example :
+//					lux_newshader_ps30.fxc
+
+//============================================
+// LIGHTMAPPEDGENERIC
+//============================================
+lux_brush_vs30.fxc
+lux_lightmappedgeneric_simple_ps30.fxc
+lux_lightmappedgeneric_bump_ps30.fxc
+
+//============================================
+// VERTEXLITGENERIC
+//============================================
+lux_model_vs30.fxc
+lux_vertexlitgeneric_simple_ps30.fxc
+lux_vertexlitgeneric_bump_ps30.fxc
+lux_vertexlitgeneric_phong_ps30.fxc
+
+//============================================
+// WORLDVERTEXTRANSITION
+//============================================
+lux_displacement_vs30.fxc
+lux_worldvertextransition_simple_ps30.fxc
+lux_worldvertextransition_bump_ps30.fxc
+
+//============================================
+// UNLITGENERIC
+//============================================
+lux_unlitgeneric_ps30.fxc
+
+//============================================
+// Post Processing Effects
+//============================================
+lux_screenspace_vs30.fxc
+lux_post_alphablend_ps30.fxc
+
+//============================================
+// L.U.X.: Clear Sky
+//============================================
+lux_sky_hdri_ps30.fxc
+
+//============================================
+// Others
+//============================================
+lux_decalmodulate_ps30.fxc
+lux_infected_ps30.fxc
+
+//============================================
+// Flashlight Shaders
+//============================================
+lux_flashlight_simple_ps30.fxc
+
+///============================================
+// TF2 Classic
+//============================================
+desaturate_ps30.fxc
+desaturate_vs30.fxc
+colourblindpattern_ps30.fxc

@@ -1,0 +1,40 @@
+//-----------------------------------------------------------------------------
+//	source_base.VPC
+//
+//  This is the base VPC file that is included by all others, on all platforms.
+//
+//	Project Script
+//-----------------------------------------------------------------------------
+
+
+$Configuration "Debug"
+{
+	$Compiler
+	{
+		// Pass on appropriate branch define to preprocessor
+		$PreprocessorDefinitions		"VPC"
+		$PreprocessorDefinitions		"$BASE;STAGING_ONLY" [$STAGING_ONLY]
+		$PreprocessorDefinitions		"$BASE;TF2C_BETA" [$TF2C_BETA]
+		$PreprocessorDefinitions		"$BASE;RAD_TELEMETRY_DISABLED" [$SOURCESDK]
+// Need to revisit the code to make things run with the _RETAIL preprocessor definition
+// This line was added in the previous check-in, but had previously not been defined in this branch
+//		$PreprocessorDefinitions		"$BASE;_RETAIL"		[$RETAIL]
+		$PreprocessorDefinitions		"$BASE;STEAM_GROUP_CHECKPOINT" [$STEAM_GROUP_CHECKPOINT]
+	}
+}
+
+$Configuration "Release"
+{
+	$Compiler
+	{
+		// Pass on appropriate branch define to preprocessor
+		$PreprocessorDefinitions		"VPC"
+		$PreprocessorDefinitions		"$BASE;STAGING_ONLY" [$STAGING_ONLY]
+		$PreprocessorDefinitions		"$BASE;TF2C_BETA" [$TF2C_BETA]
+		$PreprocessorDefinitions		"$BASE;RAD_TELEMETRY_DISABLED" [$SOURCESDK]
+// Need to revisit the code to make things run with the _RETAIL preprocessor definition
+// This line was added in the previous check-in, but had previously not been defined in this branch
+//		$PreprocessorDefinitions		"$BASE;_RETAIL"		[$RETAIL]
+		$PreprocessorDefinitions		"$BASE;STEAM_GROUP_CHECKPOINT" [$STEAM_GROUP_CHECKPOINT]
+	}
+}

@@ -1,0 +1,211 @@
+// shadertype=hlsl
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Initial D.	:	28.02.2023 DMY
+//	Last Change :	24.05.2023 DMY
+//
+//	Purpose of this File :	PixelShader for ps30, to be used on LUX_UnlitGeneric
+//
+//===========================================================================//
+
+//===========================================================================//
+//	Declare Static Combos
+//===========================================================================//
+// STATIC:	"ENVMAPMODE"				"0..2" // CUBEMAPS 2 0
+// STATIC:	"ENVMAPFRESNEL"				"0..1" // CUBEMAPS_FRESNEL 1 0
+// STATIC:	"PCC"						"0..1" // PARALLAXCORRECTEDCUBEMAPS 1 0
+// STATIC:	"DETAILTEXTURE"				"0..1" // DETAILTEXTURING 1 0
+// STATIC:	"BLENDTINTBYBASEALPHA"		"0..1" // BASETINTINGVIAALPHA 1 0
+// STATIC:	"DESATURATEBYBASEALPHA"		"0..1"
+
+//===========================================================================//
+//	Declare Dynamic Combos
+//===========================================================================//
+// DYNAMIC:	"PIXELFOGTYPE"				"0..1"
+// DYNAMIC:	"WRITEWATERFOGTODESTALPHA"	"0..0"
+
+//===========================================================================//
+//	Skipping combos that are unneeded
+//	GIGA IMPORTANT :	The order of the STATIC:'s and the order of the skips
+//						will DRASTICALLY affect compiletime!
+// ShiroDkxtro2:	The current order I compiled in 4 seconds on 8 cores @4.1GHz.
+//					Compiled SDK_ Non-Bumped VLG from Mapbase on SCells compiler,
+//					Stopped 160 seconds in as it still had 7 million combos to go.
+//===========================================================================//
+// SKIP: ( $ENVMAPMODE == 0				&&	$ENVMAPFRESNEL != 0 )
+// SKIP: ( $ENVMAPMODE == 0				&&	$PCC != 0 )
+// SKIP: ( $BLENDTINTBYBASEALPHA != 0	&&	$DESATURATEBYBASEALPHA != 0 )
+// SKIP: ( $PIXELFOGTYPE == 0			&&	$WRITEWATERFOGTODESTALPHA != 0 )
+
+//===========================================================================//
+//	Include Files ( and with them, function declarations )
+//===========================================================================//
+
+// This is used to disable features automatically.
+#include "ACROHS_Defines.h"
+
+// This is a Shader used on BRUSHES
+// However we don't need that stuff right now
+// #define BRUSH
+
+// This is a Shader used on MODELS
+#define MODEL
+
+// This Shaders does NOT use Normalmaps
+//#define NORMALTEXTURE
+
+//	This has to be included first. It includes pragmas, #define's, and the register map.
+#include "lux_common_ps_fxc.h"
+// EnvMapping Data
+#include "lux_common_envmap.h"
+
+//===========================================================================//
+//	Everything Vertex Shader is outputting, enters here
+//===========================================================================//
+struct PS_INPUT
+{
+    float4	BaseDetailTexCoord		:	TEXCOORD0;
+#if (ENVMAPMODE == 2)
+	float4	NormalENMTexCoord		:	TEXCOORD1;
+#endif
+	float3	WorldNormal				:	TEXCOORD2;
+	float3	WorldPos				:	TEXCOORD3;
+	float3	ProjPos					:	TEXCOORD4;
+//	float4	LightmapTexCoord1And2	:	TEXCOORD5;
+//	Unused
+//	float4	StaticPropLighting		:	TEXCOORD7;
+	float4	VertexColor				:	COLOR0;
+	// Open
+	// Open
+};
+ 
+//===========================================================================//
+//	Rendering Start - Entry point
+//===========================================================================//
+float4 main(PS_INPUT i) : COLOR
+{
+	//	Getting our PS_INPUT... TODO/FIXME: Does this require more memory?
+	//===========================================================================//
+	// If you see this, then Integer Constant Registers don't work, or I haven't found a way to use them.
+	int iDetailBlendMode = trunc(f1DetailBlendMode);
+	// int g_Debug = trunc(DEBUG.x);
+
+	float2 f2BaseTextureUV = i.BaseDetailTexCoord.xy;
+
+	#if DETAILTEXTURE
+	float2 f2DetailTextureUV = i.BaseDetailTexCoord.zw;
+	#endif
+
+	#if (ENVMAPMODE == 2)
+	float2 f2EnvMapMaskUV = i.NormalENMTexCoord.zw;
+	#endif
+
+	// .xyz's in case we need to pack something later
+    float3 f3FaceNormal			= i.WorldNormal.xyz;
+	float3 f3WorldPosition		= i.WorldPos.xyz;
+	float3 f3ProjectPosition	= i.ProjPos.xyz;
+
+	float4	f4BaseTexture	= tex2D(	Sampler_BaseTexture,		f2BaseTextureUV);
+
+	#if BLENDTINTBYBASEALPHA
+	// Same as VertexLitGeneric...
+	float3	f4TintedBaseTexture	= f4BaseTexture.xyz * f3BaseTextureTint;
+			f4TintedBaseTexture	= lerp(f4TintedBaseTexture, f3BaseTextureTint, f1BlendTintFactor);
+			f4BaseTexture.xyz	= lerp(f4BaseTexture.xyz, f4TintedBaseTexture, f4BaseTexture.w);
+	#else
+			f4BaseTexture.xyz *= f3BaseTextureTint;
+		#if DESATURATEBYBASEALPHA
+			float3	f3DesaturatedBaseAlpha = dot(f4BaseTexture.xyz, f3LumCoefficients);
+					f4BaseTexture.xyz = lerp(f4BaseTexture.xyz, f3DesaturatedBaseAlpha, f1DesaturationFactor);
+		#endif
+	#endif
+
+#if DETAILTEXTURE
+	float4	f4DetailTexture	= tex2D(	Sampler_DetailTexture,		f2DetailTextureUV);
+			f4DetailTexture.xyz *= f3DetailTextureTint;
+	float4	f4Result = TextureCombine( f4BaseTexture, f4DetailTexture, iDetailBlendMode, f1DetailBlendFactor );
+#else
+	float4	f4Result = f4BaseTexture;
+#endif
+
+    float3	f3ViewVector = normalize(g_EyePos.xyz - f3WorldPosition); // Lo
+	float	f1NdotV		 = max(0, dot(f3FaceNormal, f3ViewVector)); // cosLo
+
+	// Are we supposed to render a Cubemap?
+#if (ENVMAPMODE > 0)
+
+	// EnvMapMode 1 uses this. So it has to be prepared, always.
+	float3 f3CubemapMask = 1.0f;
+
+#if (ENVMAPMODE == 2) // $EnvMapMask
+	float4	f4EnvMapMask	= tex2D(	Sampler_EnvMapMask,			f2EnvMapMaskUV);
+			f3CubemapMask = f4EnvMapMask.xyz;
+#elif (ENVMAPMODE == 3) // $BaseAlphaEnvMapMask
+			f3CubemapMask = f4BaseTexture.aaa;
+#endif //	ENVMAPMODE == 4 is Normal Map Alpha, which we don't have on this Shader.
+
+		// A better reflection vector...
+		float3 f3ReflectionVector = 2.0 * f1NdotV * f3FaceNormal - f3ViewVector;
+
+		// Lookup the Texture using f3ReflectionVector as the VectorUV for the Cubemap. ( which pixel it points at)
+        float4 f4SpecularUV = float4(f3ReflectionVector, ENVMAPLOD);
+		float3 f3SpecularLookUp = ENV_MAP_SCALE * texCUBE(Sampler_EnvironmentMap, f4SpecularUV).xyz;
+
+		f3SpecularLookUp *= f3CubemapMask;
+
+		f3SpecularLookUp *= f3EnvMapTint;
+		float3 f3LookupHighSaturated = f3SpecularLookUp * f3SpecularLookUp;
+		f3SpecularLookUp = lerp( f3SpecularLookUp, f3LookupHighSaturated, f1EnvMapContrast );
+
+		// If you are curious this has to do with perception.
+		float3 f3DesaturatedCubemap = dot( f3SpecularLookUp, float3( 0.299f, 0.587f, 0.114f ) );
+		f3SpecularLookUp = lerp( f3DesaturatedCubemap, f3SpecularLookUp, f3EnvMapSaturation );
+
+#if ENVMAPFRESNEL
+
+	// TODO: Consider doing Unreal Engine Fresnel based on Envmapmask
+	float f1Fresnel = 1.0f - f1NdotV;
+	f1Fresnel = f1EnvMapFresnelScale * pow( f1Fresnel, f1EnvMapFresnelExponent) + f1EnvMapFresnelBias;
+	f3SpecularLookUp *= f1Fresnel;
+
+#endif
+
+	f4Result.xyz += f3SpecularLookUp;
+
+#endif // End Cubemap
+
+    float f1FogFactor = CalcPixelFogFactor(PIXELFOGTYPE, g_FogParams, g_EyePos.xyz, f3WorldPosition, f3ProjectPosition.z);
+
+#if WRITEWATERFOGTODESTALPHA && (PIXELFOGTYPE == PIXEL_FOG_TYPE_HEIGHT)
+    float f1Alpha = f1FogFactor;
+#else
+    float f1Alpha = f4BaseTexture.a;
+#endif // WRITEWATERFOGTODESTALPHA && (PIXELFOGTYPE == PIXEL_FOG_TYPE_HEIGHT)
+
+	// Cannot do bDepthToDestAlpha && (WRITEWATERFOGTODESTALPHA == 0)
+	// Boolean Registers may only be used in If-Statements!!!
+    bool bWriteDepthToAlpha = (WRITEWATERFOGTODESTALPHA == 0);
+	if(!bDepthToDestAlpha)
+	{
+		bWriteDepthToAlpha = false;
+	}
+
+#if DETAILTEXTURE
+	f4Result.xyz = TextureCombinePostLighting( f4Result, f4DetailTexture, iDetailBlendMode, f1DetailBlendFactor ); // $detail, $detailblendmode $detailblendfactor
+#endif
+	
+	// $VertexColor
+	if(bVertexColor)
+	{
+		f4Result.xyz *= i.VertexColor.xyz;
+	}
+
+	// $VertexAlpha
+	if(bVertexAlpha)
+	{
+		f1Alpha *= i.VertexColor.w;
+	}
+
+// Result must be f4 because of DetailTextureCombine
+    return FinalOutput(float4(f4Result.xyz, f1Alpha), f1FogFactor, PIXELFOGTYPE, TONEMAP_SCALE_LINEAR, bWriteDepthToAlpha, f3ProjectPosition.z);
+}

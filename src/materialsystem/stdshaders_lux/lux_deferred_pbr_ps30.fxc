@@ -1,0 +1,186 @@
+// shadertype=hlsl
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Initial D.	:	03.06.2023 DMY
+//	Last Change :	11.06.2023 DMY
+//
+//	Purpose of this File :	Render deferred materials
+//
+//===========================================================================//
+
+// This is used to disable features automatically.
+#include "ACROHS_Defines.h"
+
+#define MODEL
+#define NORMALTEXTURE
+#define ENVMAPMODE 1
+#include "lux_common_ps_fxc.h"
+#include "lux_common_envmap.h"
+#include "pbr_combined_functions.h"
+
+struct PS_INPUT
+{
+    float2	BaseTexCoord			:	TEXCOORD0;
+	float2	ZeroTexCoord			:	TEXCOORD1;
+	float2	BloomTexcoord			:	TEXCOORD2;
+};
+  
+const float4	g_Debug		: register(c0);
+
+// Inverse projection matrix
+uniform float3 g_ViewForward	: register(c70);
+uniform float3 g_ViewRight		: register(c71);
+uniform float3 g_ViewUp			: register(c72);
+uniform float3 g_ViewPos		: register(c73);
+
+#define Sampler_Pack0	Sampler_BaseTexture
+sampler Sampler_Pack1		: register(s1);
+#define Sampler_Pack2	Sampler_NormalTexture
+sampler Sampler_Pack3		: register(s3);
+
+#define UNPACK (1.0f/255.0f)
+
+// Entry point
+float4 main(PS_INPUT i) : COLOR
+{
+	int nDebug = trunc(g_Debug.x);
+
+	// Unpack our stuff
+	float4 f4Color_FB0	= tex2D(Sampler_Pack0,	i.BaseTexCoord); // XYZ extra data, alpha is true alpha
+	float4 f4Color_FB1	= tex2D(Sampler_Pack1,	i.BaseTexCoord); // NormalMap, when doing PCC this is ViewVector. Alpha is MaterialID
+	float4 f4Result;
+
+	// MaterialID starts at 1.0f
+	int MaterialID = trunc(f4Color_FB1.w);
+
+	// We put an indicator here to determine whether or not to draw a deferred material
+	if(MaterialID != 0)
+	{
+		float4 f4Color_FB2	= tex2D(Sampler_Pack2,	i.BaseTexCoord); // Lighting on XYZ, Alpha is Depth
+		float4 f4Color_FB3	= tex2D(Sampler_Pack3,	i.BaseTexCoord); // MRAO and Basetexture packed, Alpha is f1NdotV
+
+//////////////////////////////////
+//	Compute Position Values		//
+//////////////////////////////////
+
+		float	f1NdotV				= f4Color_FB3.w;
+		float3	f3ReflectionVector	= float3(0.0f, 0.0f, 0.0f);
+		float3	f3Specular			= float3(0.0f, 0.0f, 0.0f);
+		float3	f3Albedo			= float3(0.0f, 0.0f, 0.0f);
+		float	f1AO				= 1.0f;
+		float	f1Roughness			= 1.0f;
+
+		// ID == 2 is PCC, ID > 2 means model and 0.1 indicates EnvMapAnistropy
+		if(MaterialID == 2 || (MaterialID >= 3 && frac(f4Color_FB1.w) == 0.1f))
+		{
+			f3ReflectionVector.xyz = f4Color_FB1.xyz;
+		}
+		else
+		{
+			// We need a parallax corrected Reflection Vector thats computed on the geometry
+			// Otherise need to compute it ourselves using f1NdotV * 2 * Normal - (depth -> position - eyepos)
+			// Computing Position from depth using an inversed projection matrix
+			// https://developer.nvidia.com/gpugems/gpugems3/part-iv-image-effects/chapter-27-motion-blur-post-processing-effect
+			float2 f2ViewportPos = i.BaseTexCoord * 2.0f - 1.0f;
+
+			float3 viewRay = normalize(g_ViewForward + g_ViewRight * f2ViewportPos.x - g_ViewUp * f2ViewportPos.y);
+			float distance = f4Color_FB2.a / dot(viewRay, g_ViewForward);
+			float3 f3WorldPosition = g_ViewPos + viewRay * distance;
+
+			float3	f3ViewDir	= normalize(g_ViewPos - f3WorldPosition);
+			float3 f3NormalDir	= f4Color_FB1.xyz;
+
+			// Do not use reflect() ! the NdotV here is made from WorldNormal, f3NormalDir is pretty much NormalTexture * Normal Basis
+			f3ReflectionVector	= (f1NdotV + f1NdotV) * f3NormalDir - f3ViewDir; // ADD, MAD, 2*f1NdotV the compiler prefers add instruction here
+		}
+
+
+		if(MaterialID == 4) // Wetness Porosity
+		{
+			f3Albedo	= frac(f4Color_FB3.rgb);
+			f3Specular	= floor(f4Color_FB3.rgb) * UNPACK;
+			f1Roughness = f4Color_FB0.x;
+			f1AO		= f4Color_FB0.y;
+		}
+		else
+		{
+			float3	f3BaseTex	= frac(f4Color_FB3.rgb);
+			float3	f3MRAO		= floor(f4Color_FB3.rgb) * UNPACK;
+			float	f1Metallic	= f3MRAO.r;
+					f1Roughness = f3MRAO.g;
+					f1AO		= f3MRAO.b;
+					f3Specular	= lerp(float3(0.025f, 0.025f, 0.025f), f3BaseTex.rgb * PI, f3MRAO.r);
+					f3Albedo	= f3BaseTex.rgb * ( 1.0f - f3MRAO.r );
+		}
+
+		// Passthrough the intended Alpha
+		f4Result.w = f4Color_FB0.w;
+
+		//	AO Fresnel. ( AO should not appear when viewing from the front. )
+		//	AO happens when a pixel is occluded by nearby geometry. This is not the case when you look at it from the front.
+		//	https://advances.realtimerendering.com/other/2016/naughty_dog/NaughtyDog_TechArt_Final.pdf
+		f1AO		= lerp(1.0f, f1AO, f1NdotV);
+
+		float3 f3Lighting	= f4Color_FB2.xyz;
+		if(MaterialID == 1)
+		{
+			f3Lighting *= f1AO;
+		}
+
+//////////////////////////////////
+//			Cubemaps			//
+//////////////////////////////////
+
+		// This is better than Ambient Cubes becaues in sdk2013sp there is only a single Ambient Cube per bsp leaf.
+		// In mp there is 7 randomly distributed
+		// And in both they ignore the skytexture for their samples.
+		// This accurately captures the surroundings atleast until we get Spherical Harmonics in here
+
+		float3 EnvAmbientCube[6];
+
+		float	LOD				 = g_VariousControls1.y;
+		float4	f4SpecularUV	 = float4(f3ReflectionVector, f1Roughness * LOD);
+
+		float3	f3LookupLow		 = float3(0.0f, 0.0f, 0.0f);
+		float	f1SpecularOcclusion = 1.0f;
+		float	f1EnvMapScale = ENV_MAP_SCALE;
+
+		// Brushes don't have ambient color.
+		if(MaterialID >= 3)
+		{
+			// Bent Normal occlusion
+			if(MaterialID == 5)
+			{
+				float	f1ReflectOcclusion	= max(dot(f4SpecularUV.xyz, f4Color_FB0.xyz), 0);
+
+				// Attenuate the occlusion factor by the ambient occlusion.
+				// This is important because we only want to attenuate reflections in areas where they COULD be.
+				// If we didn't do this, reflections will be attenuated in open areas, which they shouldn't.
+				f1EnvMapScale	*= lerp(f1ReflectOcclusion, 1.0f, f1AO);
+			}
+
+			setupEnvMapAmbientCube(EnvAmbientCube, Sampler_EnvironmentMap); // Sampler_EnvMapNew  
+			f3LookupLow = f1EnvMapScale * AmbientLight(f4SpecularUV.xyz, EnvAmbientCube);	
+
+			f1SpecularOcclusion = SpecularOcclusion(f1AO, f1NdotV);
+			f4Result.xyz = f3Albedo * f3LookupLow * f1AO; // This is DIFFUSEIBL
+		}
+
+		float3	f3SpecularLookUp = f1EnvMapScale * texCUBElod(Sampler_EnvironmentMap, f4SpecularUV).xyz;
+
+		float3	f3SpecularIrradiance	= lerp(f3SpecularLookUp, f3LookupLow, f1Roughness * f1Roughness);
+		float3	f3SpecularIBL			= f3SpecularIrradiance * EnvBRDFApprox(f3Specular, f1Roughness, f1NdotV);
+				f3SpecularIBL			*= f1SpecularOcclusion;
+
+		f4Result.xyz += f3SpecularIBL + f3Lighting;
+	}
+	else
+	{
+		f4Result = f4Color_FB0;	
+	}
+
+	if(nDebug == 10)
+		f4Result.xyz = f4Color_FB1.xyz;
+
+    return f4Result;
+}

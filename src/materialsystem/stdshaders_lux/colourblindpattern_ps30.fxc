@@ -1,0 +1,107 @@
+// Includes
+#include "common_ps_fxc.h"
+//#include "common_vertexlitgeneric_dx9.h"
+//#include "common_lightmappedgeneric_fxc.h"
+//#include "common_flashlight_fxc.h"
+//#include "common_parallax.h"
+
+
+// Samplers
+sampler _Sampler_FB				: register( s0 ); // FB
+sampler _Sampler_Pattern		: register( s1 ); // Pattern Image (RGBA)
+sampler _Sampler_Scratch		: register( s2 ); // Scratch buffer, whichever RT we used to render the silhouette team info into
+
+// Constants
+const float2 _g_TexelSize		: register( c17 );
+const float _g_UVScaling	: register( c18 );
+const float _g_IntensityFactor : register( c19 );
+const float4 _g_SaturationMinima : register( c20 );
+const float4 _g_SaturationMaxima : register( c21 );
+const float4 _g_TargetHues : register( c22 );
+const float4 _g_HueDeltaMinima : register( c23 );
+const float4 _g_HueDeltaMaxima : register( c24 );
+const float _g_PatternChannel : register( c25 );
+
+// All components of the HSV vector are [0...1] range, including hue (0...360 -> 0...1)
+float3 rgb2hsv(float3 c)
+{
+	float4 K = float4(0.0f, -1.0f / 3.0f, 2.0f / 3.0f, -1.0f);
+	float4 p = lerp(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
+	float4 q = lerp(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
+	
+	float d = q.x - min(q.w, q.y);
+	float e = 1.0e-10;
+    return float3(abs(q.z + (q.w - q.y) / (6.0f * d + e)), d / (q.x + e), q.x);
+}
+
+float hueDifference(float source, float target)
+{
+	return min(1.0 - abs(source - target), abs(source - target));
+}
+
+// R -> 0 ... B -> 2. Black will be -1
+int RGBtoIndex(float3 rgbaIn)
+{
+	return ((int) round(max(max(rgbaIn.r, rgbaIn.g * 2), rgbaIn.b * 3))) - 1;
+}
+
+// Semantic structures
+struct PS_INPUT
+{
+	HALF2 vTexCoord			:	TEXCOORD0;
+};
+
+struct PS_OUTPUT
+{
+	float4 vColor_0				:	COLOR0;
+};
+
+// Entry point
+PS_OUTPUT main( const PS_INPUT In )
+{
+	PS_OUTPUT Out;
+
+	// Scale the units
+	float2 scaledUV = In.vTexCoord * _g_UVScaling;
+	// Make the units square
+	scaledUV.y *= (_g_TexelSize.x / _g_TexelSize.y);
+	
+	// Contains the white silhouette of the team members.
+	float4 silhouetteBuffer = tex2D(_Sampler_Scratch, In.vTexCoord);
+	// Is the pixel in question a silhouette, or is it a background pixel? (1 and 0 respectively)
+	int isSilhouette = (int) round( silhouetteBuffer.r );
+	int isGreyscale = (int) round( silhouetteBuffer.b );
+	float3 luminance_coefficients = { 0.3, 0.59, 0.11 };
+
+	// Which channel should we sample to get our team's pattern?
+	int patternIndex = (int) round(_g_PatternChannel);
+	float pattern = tex2D( _Sampler_Pattern, scaledUV )[patternIndex];
+	
+	float4 fbSample = tex2D(_Sampler_FB, In.vTexCoord);
+	float3 framebufferHSV = rgb2hsv(fbSample.rgb);
+	
+	// For a saturation > minimum and < maximum, remap the value.
+	// For anything less than minimum, 0, and anything above the maximum, 1.
+	// the non-pattern index (-1) will probably give NaNs which is fine, because they'll just be 0 in the lerp
+	float saturationFactor = saturate((framebufferHSV.y - _g_SaturationMinima[patternIndex]) / (_g_SaturationMaxima[patternIndex] - _g_SaturationMinima[patternIndex]));
+
+	// For a hue difference > minimum and < maximum, remap the value.
+	// Recall that hue must be wrapped around 1.0 and 0.0, so factor that into the difference
+	// Anything less than the minimum is given 0, and above the maximum is 1.0
+	float hueDifference = hueDifference(framebufferHSV.r, _g_TargetHues[patternIndex]);		// Get the smallest difference between the two wrapped hue angles
+	float hueDifferenceFactor = 1.0 - saturate((hueDifference - _g_HueDeltaMinima[patternIndex]) / (_g_HueDeltaMaxima[patternIndex] - _g_HueDeltaMinima[patternIndex]));	// Same remapping maths as before, but one-minus to invert
+	
+	// Lerp between the original pixel and the pattern based on the intensity factor
+	fbSample.rgb = lerp(fbSample.rgb, fbSample.rgb * pattern, isSilhouette * saturate(_g_IntensityFactor * saturationFactor * hueDifferenceFactor));	
+	fbSample.rgb = lerp(fbSample.rgb, dot(fbSample.rgb, luminance_coefficients.rgb).rrr, isGreyscale);
+	
+	// For debugging the patterns as colours:
+	//float debugColours[9] = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+	//float3 debugColour = float3(debugColours[patternIndex * 3], debugColours[patternIndex * 3 + 1], debugColours[patternIndex * 3 + 2]);
+	//fbSample.rgb = lerp(fbSample.rgb, fbSample.rgb * debugColour, isSilhouette);
+	
+	// PS Output
+	Out.vColor_0 = fbSample;
+	return Out;
+	// ####################
+}

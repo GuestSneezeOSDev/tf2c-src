@@ -1,0 +1,405 @@
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Initial D.	:	07.02.2023 DMY
+//	Last Change :	24.05.2023 DMY
+//
+//	Purpose of this File :	VertexShader for vs30, to be used on Models
+//
+//===========================================================================//
+
+//  STATIC: "NORMALTEXTURE_UV"			"0..1"
+//	STATIC: "HALFLAMBERT"				"0..1" // HALFLAMBERTIAN 1 0
+//  STATIC: "TREESWAY"					"0..0" // TREESWAYING 2 0
+//	STATIC:	"LIGHTMAP_UV"				"0..0"
+//	STATIC: "SEAMLESS_BASE"				"0..0"
+//  STATIC: "DETAILTEXTURE_UV"			"0..1"
+//  STATIC: "ENVMAPMASK_UV"				"0..1"
+//  STATIC: "DECAL"						"0..1"
+
+//	DYNAMIC: "STATICPROPLIGHTING"		"0..1"
+//	DYNAMIC: "DYNAMICPROPLIGHTING"		"0..1"
+//	DYNAMIC: "MORPHING"					"0..1"
+//  DYNAMIC: "SKINNING"                 "0..1"
+
+// No VertexLighting when doing bumpmapping
+// SKIP: ($NORMALTEXTURE_UV != 0 && $HALFLAMBERT == 1)
+// SKIP: ($NORMALTEXTURE_UV != 0 && STATICPROPLIGHTING == 1)
+// SKIP: ($NORMALTEXTURE_UV != 0 && DYNAMICPROPLIGHTING == 1)
+// No idea why this won't work but whatever and I wanted faster compiles
+// SKIP: ($NORMALTEXTURE_UV != 0 && $TREESWAY == 1)
+// Lightmapped and Moving = RTX Mode(?)
+// SKIP: ($TREESWAY != 0 && $LIGHTMAP_UV == 1)
+// Morphing Decals? NOPE
+// SKIP: ($MORPHING == 1 && $DECAL == 1)
+
+// This might make this thing compatible with other tools used to make shaders... Shade-ing... Red-ing... Something along those lines
+// -------------------------------------------------------
+//#if HALFLAMBERT
+//static const bool bHalfLambert = true;
+//#else
+//static const bool bHalfLambert = false;
+//#endif
+
+//#if STATICPROPLIGHTING
+//static const bool bStaticLight = true;
+//#else
+//static const bool bStaticLight = false;
+//#endif
+
+//#if DYNAMICPROPLIGHTING
+//static const bool bDynamicLight = true;
+//#else
+//static const bool bDynamicLight = false;
+//#endif
+
+// -------------------------------------------------------
+
+// We include both common_vs_fxc.h and common_fxc.h ( through vs_fxc.h )
+// This is done to get definitions etc for vertex shaders 
+// #include "common_vs_fxc.h"
+
+// Allows us to use model functions from lux_common_vs_fxc.h
+#define MODEL
+
+// Include for lux shaders
+#include "lux_common_vs_fxc.h"
+
+ 
+
+const float4 cBaseTexCoordTransform[2]			: register(SHADER_SPECIFIC_CONST_13); // 13 & 14
+const float4 cSeamlessScales					: register(c240);
+#if SEAMLESS_BASE
+#define SEAMLESS_BASE_SCALE cSeamlessScales.x
+#endif
+
+#if NORMALTEXTURE_UV > 0
+const float4 cNormalTexCoordTransform[2]		:  register( SHADER_SPECIFIC_CONST_15 ); // 15 & 16
+#if NORMALTEXTURE_UV == 2
+#define SEAMLESS_BUMP_SCALE cSeamlessScales.z
+#endif
+#endif
+
+#if DETAILTEXTURE_UV > 0
+const float4 cDetailTexCoordTransform[2]		:  register( SHADER_SPECIFIC_CONST_17 );	// 17 & 18
+#if DETAILTEXTURE_UV == 2
+#define SEAMLESS_DETAIL_SCALE cSeamlessScales.y
+#endif
+#endif
+
+#if ENVMAPMASK_UV > 0
+const float4 cEnvMapMaskTexCoordTransform[2]	:  register( SHADER_SPECIFIC_CONST_19 );	// 19 & 20
+#if ENVMAPMASK_UV == 2
+#define SEAMLESS_EMM_SCALE cSeamlessScales.w
+#endif
+#endif
+
+// NOTE: cMorphTargetTextureDim.xy	= target dimensions,
+//		 cMorphTargetTextureDim.z	= 4tuples/morph
+const float3 cMorphTargetTextureDim				:	register( SHADER_SPECIFIC_CONST_10 );
+const float4 cMorphSubrect						:	register( SHADER_SPECIFIC_CONST_11 );
+sampler2D MorphSampler							:	register( s0 );
+
+//-----------------------------------------------------------------------------
+// Input vertex format
+//-----------------------------------------------------------------------------
+struct VS_INPUT
+{
+    // This is all of the stuff that we ever use
+    float4 vPos                     : POSITION;
+	float4 vBoneWeights             : BLENDWEIGHT;	//	Despite no bones,
+	float4 vBoneIndices             : BLENDINDICES; //	we use these in SkinPositionAndNormal()
+    float4 vNormal                  : NORMAL;
+    float2 vTexCoord0               : TEXCOORD0;
+    float4 vLightmapTexCoord        : TEXCOORD1;
+    float4 vLightmapTexCoordOffset  : TEXCOORD2;
+	float4 vColor                   : COLOR0;
+	float3 vSpecular				: COLOR1;
+
+	// User What now? How can we use that?
+	float4 vUserData				: TANGENT;
+	// Position and normal/tangent deltas
+	float4 vPosFlex					: POSITION1;
+	float4 vNormalFlex				: NORMAL1;
+
+	float vVertexID					: POSITION2;
+};
+
+struct VS_OUTPUT
+{
+    // Stuff that isn't seen by the pixel shader
+	// This is used by the GPU to determine what's actually rendered on-screen ( The actual screenspace position of our triangles )
+    float4 ProjPosSetup				:	POSITION; 
+//	float  Fog						:	FOG;		//... Can we kill this? :)? Answer is yes :D
+    // Stuff that is seen by the pixel shader
+    float4	BaseDetailTexCoord		:	TEXCOORD0;
+	float4	NormalEMMTexCoord		:	TEXCOORD1;
+	float3	WorldNormal				:	TEXCOORD2; // .w Free
+	float3	WorldPos				:	TEXCOORD3; // .w Free
+	float3	ProjPos					:	TEXCOORD4; // .w Free
+	float4	LightmapTexCoord1And2	:	TEXCOORD5; // When not doing static props, this should be free on .yw, but also .xw without static prop
+#if NORMALTEXTURE_UV > 0
+	float4	LightAtten				:	TEXCOORD6;
+#else
+	float4	Color					:	TEXCOORD6;
+#endif
+#if (SEAMLESS_BASE || DETAILTEXTURE_UV == 2 || NORMALTEXTURE_UV == 2 || ENVMAPMASK_UV == 2)
+	float4 SeamlessWCoordinates		:	TEXCOORD7; // UVW.z coordinates
+	float3 SeamlessWeights          :	COLOR0; // x y z projection weights
+#else
+	// Used for UnlitGeneric
+	// ShiroDkxtro2 Interesting : Supposedly COLOR and TEXCOORD output are different, COLOR outputs are somehow interpolated in a weird way?
+	// Originally, on Vertex_and_unlit_generic_ps2whatever.fxc the vertex color output was a TEXCOORD.
+	// I testeded it and they appear to result identically, both COLOR and TEXCOORD have the same limitations when it comes to Vertex Shader Outputs.
+	// Its a COLOR now because that simply makes more sense from terminology
+	float4 VertexColor				:	COLOR0; // VertexRGBA
+#endif
+};
+
+//-----------------------------------------------------------------------------
+// Main shader entry point
+//-----------------------------------------------------------------------------
+VS_OUTPUT main( const VS_INPUT v )
+{
+	VS_OUTPUT o = ( VS_OUTPUT )0;
+	
+	float3 vNormal, vPos;
+	vPos = v.vPos.xyz;
+	DecompressVertex_Normal(v.vNormal, vNormal);
+	// We mainly use SkinPositionAndNormal because we want the normal ( and pos )
+	float3 WorldNormal, WorldPos;
+
+#if (SEAMLESS_BASE || DETAILTEXTURE_UV == 2 || NORMALTEXTURE_UV == 2 || ENVMAPMASK_UV == 2)
+
+
+	float3 NormalizedNormal = normalize(vNormal);
+
+	// "sums to 1."
+	// TODO: A face has a 3 dimensional vector that defines in which direction it is pointing.
+	// The sum of this vector is always 1 as it uses a 0-1 range.
+	// However we now multiply it by itself, this should never sum to 1 unless the face was facing in only a single direction.
+	// So why did the comment say it sums to 1.? It definitely shouldn't!
+	o.SeamlessWeights = NormalizedNormal * NormalizedNormal;
+#else
+	// This might look a bit odd, you might say "???"
+	// However, this is kind of interesting. Some materials, ( detailsprites for example )
+	// That color is usually in Gamma Space, so it must be converted to linear
+	// Otherwise certain materials ( Console Corners ) will be brigther than the rest.
+	// Why is it not in Linear space to begin with? We don't know.
+	// Time to constantly spam expensive exp2 instructions!!! 
+	o.VertexColor.xyz = pow( v.vColor.xyz, 2.2f );
+	// Yes this one of course is linear
+	o.VertexColor.w = v.vColor.w;
+#endif
+
+#if !MORPHING
+
+	 // Flexes coming in from a separate stream
+	float3 vPosDelta = v.vPosFlex.xyz * cFlexScale.x;
+	float3 vNormalDelta = v.vNormalFlex.xyz * cFlexScale.x; // cFlexScale defined in common_vs_fxc.h Binary Value. Either 0 or 1
+
+	// TODO: Wrinklemapping
+	// flWrinkle = vPosFlex.w * cFlexScale.y; // According to common_vs_fxc.h, y isn't even used...
+
+	vPos.xyz	  += vPosDelta;
+	vNormal       += vNormalDelta;
+#else
+	#if DECAL // && MORPHING - Packed together with the statement above.
+		
+	float4 t = float4( v.vLightmapTexCoordOffset.x, v.vLightmapTexCoordOffset.y, 0.0f, 0.0f );
+	float3 vPosDelta = tex2Dlod( MorphSampler, t );
+	t.x += 1.0f / cMorphTargetTextureDim.x;
+	float3 vNormalDelta = tex2Dlod( MorphSampler, t );
+	vPos.xyz	+= vPosDelta.xyz * v.vLightmapTexCoordOffset.z;
+	vNormal		+= vNormalDelta.xyz * v.vLightmapTexCoordOffset.z;
+
+	#else
+
+//	float4 vPosDelta, vNormalDelta;
+//	SampleMorphDelta2( MorphSampler, cMorphTargetTextureDim, cMorphSubrect, v.vVertexID, vPosDelta, vNormalDelta );
+//	vPos.xyz	  += vPosDelta;
+//	vNormal       += vNormalDelta;
+
+	float4 vPosDelta, vNormalDelta;
+	SampleMorphDelta2( MorphSampler, cMorphTargetTextureDim, cMorphSubrect, v.vVertexID, vPosDelta, vNormalDelta );
+	vPos		+= vPosDelta.xyz;
+	vNormal		+= vNormalDelta.xyz;
+//	vTangent	+= vNormalDelta.xyz;
+//	flWrinkle = vPosDelta.w;
+
+	#endif
+#endif
+
+#if SKINNING
+	SkinPositionAndNormal(true, float4(vPos,1.0f), vNormal, v.vBoneWeights, v.vBoneIndices, WorldPos, WorldNormal);
+#else
+	SkinPositionAndNormal(false, float4(vPos,1.0f), vNormal, v.vBoneWeights, v.vBoneIndices, WorldPos, WorldNormal);
+#endif
+
+#if DECAL && MORPHING
+	// Avoid z precision errors. TODO: Test if this entire block works correctly.
+	WorldPos += WorldNormal * 0.05f * v.vLightmapTexCoordOffset.z; // This is not actually LightmapTexCoords... But Decal ones I guess
+#endif
+	
+	
+	// Transform into projection space
+	float4 vProjPos = mul(float4(WorldPos, 1), cViewProj);
+	o.ProjPosSetup = vProjPos;
+	vProjPos.z = dot(float4(WorldPos, 1), cViewProjZ);
+	
+	o.ProjPos.xyz = vProjPos.xyz;
+//	o.Fog = CalcFog(WorldPos, vProjPos.xyz, false);
+	
+	// Needed for water fog alpha and diffuse lighting 
+	o.WorldPos.xyz = WorldPos;
+	o.WorldNormal.xyz = normalize(WorldNormal);
+
+#if LIGHTMAP_UV
+	// Here's how it works.
+	// Original UV Before : 0.123456
+	// Lightmap UV Before = 0.123456
+	// We need to discard some data. Its too much.
+	// Original UV After : 0.1234000 - We want to have more data on the original UV.
+	// Lightmap UV after = 0.0000123 - We can somewhat discard this data, its not needed.
+	// The UV after packing? 0.1234123. Why? 123.12345678 turns into 123.123459. Guess the problem!
+	float2 LightMapUVs			= v.vTexCoord0*10000 - floor(v.vTexCoord0*10000);
+	float2 BaseTexCoords		= (v.vTexCoord0 - (LightMapUVs*0.0001));
+	o.LightmapTexCoord1And2.xy	= v.vLightmapTexCoord + v.vLightmapTexCoordOffset;
+#else
+	float2 BaseTexCoords		= v.vTexCoord0;
+	o.LightmapTexCoord1And2.xy	= v.vTexCoord0; // Everything else is forced to use the original UV's.
+#endif
+
+	
+	// BaseTexture Coordinate transform
+	#if (SEAMLESS_BASE && !VERTEX_RGBA)
+		// Now as a 3d transform. This should work?!
+		// We use vPos and not adjusted Position value!
+		float3 f3BaseCoords = mul( float4( v.vPos ), cModel[0] ).xyz;
+
+		// [0].x is scale for U, and [1].y is scale for V
+			f3BaseCoords.xy *= float2(cBaseTexCoordTransform[0].x, cBaseTexCoordTransform[1].y);
+
+		// Apply Seamless Scale
+			f3BaseCoords.xyz *= SEAMLESS_BASE_SCALE;
+
+		// [0].w is translation for U, and [1].w is translation for V
+			f3BaseCoords.xy += float2(cBaseTexCoordTransform[0].w, cBaseTexCoordTransform[1].w);
+
+		o.BaseDetailTexCoord.xy = f3BaseCoords.xy;
+		o.SeamlessWCoordinates.x = f3BaseCoords.z; // Ugly packing.
+	#else
+		// Previously : 
+		// o.BaseDetailTexCoord.x = dot( v.vTexCoord0, cBaseTexCoordTransform[0] ) + cBaseTexCoordTransform[0].w;
+		// o.BaseDetailTexCoord.y = dot( v.vTexCoord0, cBaseTexCoordTransform[1] ) + cBaseTexCoordTransform[1].w;
+		// What this actually is :
+		// U * scale + V *  0.0f + translation
+		// U *  0.0f + V * scale + translation
+		// This does an addition and multiplication for nothing.
+		// So heres a more optimised version
+			o.BaseDetailTexCoord.x = v.vTexCoord0.x * cBaseTexCoordTransform[0].x + cBaseTexCoordTransform[0].w;
+			o.BaseDetailTexCoord.y = v.vTexCoord0.y * cBaseTexCoordTransform[1].y + cBaseTexCoordTransform[1].w;
+	#endif
+	
+	// DetailTexture Coordinate Transform
+	#if DETAILTEXTURE_UV == 1
+			// Previously : 
+			// o.BaseDetailTexCoord.z = dot( v.vTexCoord0, cDetailTexCoordTransform[0] ) + cDetailTexCoordTransform[0].w;
+			// o.BaseDetailTexCoord.w = dot( v.vTexCoord0, cDetailTexCoordTransform[1] ) + cDetailTexCoordTransform[1].w;
+			// What this actually is :
+			// U * scale + V *  0.0f + translation
+			// U *  0.0f + V * scale + translation
+			// This does an addition and multiplication for nothing.
+			// So heres a more optimised version
+			#if (SEAMLESS_BASE && !VERTEX_RGBA)
+				o.BaseDetailTexCoord.zw		= f3BaseCoords.xy;
+				o.SeamlessWCoordinates.y	= f3BaseCoords.z;
+			#else
+				o.BaseDetailTexCoord.z = v.vTexCoord0.x * cDetailTexCoordTransform[0].x + cDetailTexCoordTransform[0].w;
+				o.BaseDetailTexCoord.w = v.vTexCoord0.y * cDetailTexCoordTransform[1].y + cDetailTexCoordTransform[0].w;
+			#endif
+	#elif (DETAILTEXTURE_UV == 2 && !VERTEX_RGBA)
+		// Now as a 3d transform. This should work?!
+		// We use vPos and not adjusted Position value!
+		float3 f3DetailCoords = v.vPos.xyz;
+
+		// [0].x is scale for U, and [1].y is scale for V
+			f3DetailCoords.xy *= float2(cDetailTexCoordTransform[0].x, cDetailTexCoordTransform[1].y);
+
+		// Apply Seamless Scale
+			f3DetailCoords.xyz *= SEAMLESS_DETAIL_SCALE;
+
+		// [0].w is translation for U, and [1].w is translation for V
+			f3DetailCoords.xy += float2(cDetailTexCoordTransform[0].w, cDetailTexCoordTransform[1].w);
+
+		o.BaseDetailTexCoord.zw = f3DetailCoords.xy;
+		o.SeamlessWCoordinates.y = f3DetailCoords.z; // Ugly packing.
+	#endif
+
+	// EnvMapMask Coordinate Transform
+	#if ENVMAPMASK_UV == 1
+		#if (SEAMLESS_BASE && !VERTEX_RGBA)
+			o.NormalEMMTexCoord.zw 		= f3BaseCoords.xy;
+			o.SeamlessWCoordinates.w	= f3BaseCoords.z;
+		#else
+			o.NormalEMMTexCoord.z = v.vTexCoord0.x * cEnvMapMaskTexCoordTransform[0].x + cEnvMapMaskTexCoordTransform[0].w;
+			o.NormalEMMTexCoord.w = v.vTexCoord0.y * cEnvMapMaskTexCoordTransform[1].y + cEnvMapMaskTexCoordTransform[1].w;
+		#endif
+	#elif (ENVMAPMASK_UV == 2 && !VERTEX_RGBA)
+		// Now as a 3d transform. This should work?!
+		// We use vPos and not adjusted Position value!
+		float3 f3EMMCoords = v.vPos.xyz;
+
+		// [0].x is scale for U, and [1].y is scale for V
+			f3EMMCoords.xy *= float2(cEnvMapMaskTexCoordTransform[0].x, cEnvMapMaskTexCoordTransform[1].y);
+
+		// Apply Seamless Scale
+			f3EMMCoords.xyz *= SEAMLESS_EMM_SCALE;
+
+		// [0].w is translation for U, and [1].w is translation for V
+			f3EMMCoords.xy += float2(cEnvMapMaskTexCoordTransform[0].w, cEnvMapMaskTexCoordTransform[1].w);
+
+		o.NormalEMMTexCoord.zw = f3EMMCoords.xy;
+		o.SeamlessWCoordinates.w = f3EMMCoords.z; // Ugly packing.
+	#endif
+
+
+// NormalTexture Coordinate Transform
+#if NORMALTEXTURE_UV != 0
+	#if NORMALTEXTURE_UV == 1
+		#if (SEAMLESS_BASE && !VERTEX_RGBA)
+			o.NormalEMMTexCoord.xy 		= f3BaseCoords.xy;
+			o.SeamlessWCoordinates.z	= f3BaseCoords.z;
+		#else
+			o.NormalEMMTexCoord.x = v.vTexCoord0.x * cNormalTexCoordTransform[0].x + cNormalTexCoordTransform[0].w;
+			o.NormalEMMTexCoord.y = v.vTexCoord0.y * cNormalTexCoordTransform[1].y + cNormalTexCoordTransform[1].w;
+		#endif
+	#elif  (NORMALTEXTURE_UV == 2 && !VERTEX_RGBA)
+		// Now as a 3d transform. This should work?!
+		// We use vPos and not adjusted Position value!
+		float3 f3BumpCoords = v.vPos.xyz;
+
+		// [0].x is scale for U, and [1].y is scale for V
+			f3BumpCoords.xy *= float2(cNormalTexCoordTransform[0].x, cNormalTexCoordTransform[1].y);
+
+		// Apply Seamless Scale
+			f3BumpCoords.xyz *= SEAMLESS_BUMP_SCALE;
+
+		// [0].w is translation for U, and [1].w is translation for V
+			f3BumpCoords.xy += float2(cNormalTexCoordTransform[0].w, cNormalTexCoordTransform[1].w);
+
+		o.NormalEMMTexCoord.xy = f3BumpCoords.xy;
+		o.SeamlessWCoordinates.z = f3BumpCoords.z; // Ugly packing.
+	#endif
+
+	o.LightAtten.x = LUX_GetLightAttenuation(WorldPos, 0);
+	o.LightAtten.y = LUX_GetLightAttenuation(WorldPos, 1);
+	o.LightAtten.z = LUX_GetLightAttenuation(WorldPos, 2);
+	o.LightAtten.w = LUX_GetLightAttenuation(WorldPos, 3);
+#else
+	// Note that this DOES work on bumped models for StaticPropLighting
+	// Due to the lack of Light Vectors, we cannot have bumped lighting for it though
+	o.Color.xyz = LUX_VertexLighting( WorldPos, WorldNormal, v.vSpecular, STATICPROPLIGHTING, DYNAMICPROPLIGHTING, HALFLAMBERT );
+#endif
+
+    return o;
+}

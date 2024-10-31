@@ -1,0 +1,5 @@
+[auth]
+token=46ee197615754bc19baeaee6b347a5008b6b6a69f4b943fdadee6e67f59876ed
+
+[defaults]
+url = https://sentry.sappho.io

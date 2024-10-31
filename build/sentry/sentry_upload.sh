@@ -1,0 +1,1 @@
+./sentry-cli-Linux-x86_64 upload-dif -o sdk13-sentry -p tf2c-native-proj ../../game/ --log-level=info

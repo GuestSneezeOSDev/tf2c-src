@@ -1,0 +1,141 @@
+// shadertype=hlsl
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Initial D.	:	28.02.2023 DMY
+//	Last Change :	24.05.2023 DMY
+//
+//	Purpose of this File :	PixelShader for ps30, to be used on LUX_UnlitGeneric
+//
+//===========================================================================//
+
+//===========================================================================//
+//	Declare Static Combos
+//===========================================================================//
+// STATIC:	"DETAILTEXTURE"				"0..1" // DETAILTEXTURING 1 0
+// STATIC:	"VERTEXALPHA"				"0..1"
+// STATIC:	"PARALLAX"					"0..1"
+
+//===========================================================================//
+//	Declare Dynamic Combos
+//===========================================================================//
+// DYNAMIC:	"PIXELFOGTYPE"				"0..1"
+
+//===========================================================================//
+//	Include Files ( and with them, function declarations )
+//===========================================================================//
+
+// This is used to disable features automatically.
+#include "ACROHS_Defines.h"
+
+// This is a Shader used on BRUSHES
+// However we don't need that stuff right now
+// #define BRUSH
+
+// This is a Shader used on BRUSHES AND MODELS
+// And it doesn't really matter
+// #define MODEL
+
+// We need this for Parallax Mapping
+#define NORMALTEXTURE
+
+//	This has to be included first. It includes pragmas, #define's, and the register map.
+#include "lux_common_ps_fxc.h"
+#include "lux_common_parallax.h"
+
+// DetailMode is always defined so we will just use these empty ones
+#define			f1FogScale						(g_DetailMode.y)
+#define			f1FogExponent					(g_DetailMode.w)
+
+//===========================================================================//
+//	Everything Vertex Shader is outputting, enters here
+//===========================================================================//
+struct PS_INPUT
+{
+    float4	BaseDetailTexCoord		:	TEXCOORD0;
+	float3	WorldNormal				:	TEXCOORD2;
+	float3	WorldPos				:	TEXCOORD3;
+	float3	ProjPos					:	TEXCOORD4;
+//	float4	LightmapTexCoord1And2	:	TEXCOORD5;
+//	Unused
+#if VERTEXALPHA
+	float4	VertexColor				:	COLOR0;
+#endif
+	// Open
+	// Open
+};
+ 
+//===========================================================================//
+//	Rendering Start - Entry point
+//===========================================================================//
+float4 main(PS_INPUT i) : COLOR
+{
+	float2 f2BaseTextureUV = i.BaseDetailTexCoord.xy;
+
+	#if DETAILTEXTURE
+	float2 f2DetailTextureUV = i.BaseDetailTexCoord.zw;
+	#endif
+
+	// .xyz's in case we need to pack something later
+    float3 f3FaceNormal = normalize(i.WorldNormal.xyz);
+	float3 f3WorldPosition		= i.WorldPos.xyz;
+	float3 f3ProjectPosition	= i.ProjPos.xyz;
+
+	#if PARALLAX
+
+	// ShiroDkxtro2 :	We do this like the PBR Shader.
+	//					Tottery says this causes issues on smoothed models.
+	//					However, it means we can receive more things from the Vertex Shader
+	//					And I have not noticed any of such Issues.
+	float3 f3WorldNormal = f3FaceNormal;
+    float3 f3SurfaceTangent;
+    float3 f3SurfaceBase; 
+    float f1FlipSign;
+    float3x3 f3x3NormalBasis = Compute_Tangent_Frame(f3FaceNormal, f3WorldPosition, f2BaseTextureUV.xy , f3SurfaceTangent, f3SurfaceBase, f1FlipSign);
+	float3	f3ViewVector = normalize(g_EyePos.xyz - f3WorldPosition); // Lo
+
+	// View Space Direction Vector ( Just indicates X,Y direction )
+	float3 f3RelativeViewDirection	=	float3(	dot(f3ViewVector, f3SurfaceTangent),	dot(f3ViewVector, f3SurfaceBase),	dot(f3ViewVector, f3FaceNormal));
+
+	// only 8 layers because expensive
+	float2 ParallaxOffest = ParallaxOcclusionMapping(f2BaseTextureUV, f3RelativeViewDirection, Sampler_NormalTexture, f1ParallaxHeight, f1ParallaxMaxOffset, 16.0f);
+
+	f2BaseTextureUV += ParallaxOffest;
+
+		#if DETAILTEXTURE
+			f2DetailTextureUV += ParallaxOffest;
+		#endif
+	#endif
+
+	//===========================================================================//
+	//	Getting the current Pixels Color from the Samplers
+	//===========================================================================//
+
+	float4	f4BaseTexture	= tex2D(	Sampler_BaseTexture,		f2BaseTextureUV);
+	f4BaseTexture.xyz += f3BaseTextureTint.x;
+
+#if DETAILTEXTURE
+	float4	f4DetailTexture	= tex2D(	Sampler_DetailTexture,		f2DetailTextureUV); // TEXLD
+
+	// Detailblendmode 0
+	f4DetailTexture.xyz *= lerp(float3(1.0f,1.0f,1.0f), 2.0f * f4DetailTexture.xyz, f1DetailBlendFactor); // MUL, LRP, MUL
+#endif
+
+	float4	f4Result = f4BaseTexture;
+//	float f1FogFactor = CalcPixelFogFactor(PIXELFOGTYPE, g_FogParams, g_EyePos.xyz, f3WorldPosition, f3ProjectPosition.z);
+	float f1FogFactor = 1.0f;
+	// This a comment from the ASW DecalModulate Code :
+	// "Since we're blending with a mod2x, we need to compensate with this hack
+	// NOTE: If the fog color (not fog density) is extremely dark, this can makes some decals seem
+	//       a little transparent, but it's better than not doing this"
+	// I assume this code also exists on the sdk's Shader, although we don't have access to that.
+	// If this turns out to be incorrect and ASW Fog is somehow different, we can still remove it later.
+//	f1FogFactor = pow( saturate( f1FogFactor * f1FogScale ), f1FogExponent );
+	#if VERTEXALPHA
+		float f1Factor = i.VertexColor.a;
+	#else
+		float f1Factor = 1.0f;
+	#endif
+	f4Result.xyz = lerp(float3( 0.5f, 0.5f, 0.5f ), f4Result.xyz, f1Factor);
+
+    return f4Result; // FinalOutput(f4Result, f1FogFactor, PIXELFOGTYPE, TONEMAP_SCALE_NONE);
+}

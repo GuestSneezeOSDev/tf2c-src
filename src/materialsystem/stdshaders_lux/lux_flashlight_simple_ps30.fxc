@@ -1,0 +1,467 @@
+// shadertype=hlsl
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Initial D.	:	24.05.2023 DMY
+//	Last Change :	24.05.2023 DMY
+//
+//	Purpose of this File :	Flashlight for materials without bumpmaps on models and brushes
+//
+//===========================================================================//
+
+//===========================================================================//
+//	Declare Static Combos
+//===========================================================================//
+// STATIC:	"FLASHLIGHTDEPTHFILTERMODE" "0..2"
+// STATIC:	"WORLDVERTEXTRANSITION"		"0..1"
+// STATIC:	"DETAILTEXTURE2"			"0..0" // DETAILTEXTURING 1 0
+// STATIC:	"BLENDTINTBYBASEALPHA"		"0..1" // BASETINTINGVIAALPHA 1 0
+// STATIC:	"DESATURATEBYBASEALPHA"		"0..1"
+// STATIC:	"DETAILTEXTURE"				"0..1" // DETAILTEXTURING 1 0
+// STATIC:	"BUMPMAPPED"				"0..1"
+// STATIC:	"SSBUMP"					"0..1"
+// STATIC:	"PHONG"						"0..1" // PHONG_REFLECTIONS
+// STATIC:	"PHONGEXPONENTTEXTURE"		"0..1"
+
+//===========================================================================//
+//	Declare Dynamic Combos
+//===========================================================================//
+// DYNAMIC:	"PIXELFOGTYPE"				"0..1"
+// DYNAMIC: "FLASHLIGHTSHADOWS"			"0..1"
+
+//===========================================================================//
+//	Skipping combos that are unneeded
+//	GIGA IMPORTANT :	The order of the STATIC:'s and the order of the skips
+//						will DRASTICALLY affect compiletime!
+//===========================================================================//
+// SKIP: ($WORLDVERTEXTRANSITION == 0	&&	$DETAILTEXTURE2 == 1)
+// SKIP: ($BLENDTINTBYBASEALPHA == 1	&&	$DESATURATEBYBASEALPHA == 1)
+// SKIP: ($BUMPMAPPED == 0				&&	$PHONG == 1)
+// SKIP: ($BUMPMAPPED == 0				&&	$SSBUMP == 1)
+// SKIP: ($SSBUMP == 1					&&	$PHONG == 1)
+// SKIP: ($PHONG == 0					&&	$PHONGEXPONENTTEXTURE == 1)
+// SKIP: ($PHONG == 1					&&	$WORLDVERTEXTRANSITION == 1)
+
+// This is used to disable features automatically.
+#include "ACROHS_Defines.h"
+
+// This is a Shader used on BRUSHES
+// However this would disable bAmbientLight in common_ps so we don't define it
+// #define BRUSH
+
+// Also on Displacements
+#define DISPLACEMENT
+
+// Can use Seamless Texturemapping
+#define SEAMLESS
+
+// This is a Shader used on MODELS ( and brushes )
+#define MODEL
+
+// This Shaders USES Normalmaps ( when BUMPMAPPED == 1 )
+#define NORMALTEXTURE
+
+//===========================================================================//
+//	Include Files ( and with them, function declarations )
+//===========================================================================//
+//	This has to be included first. It includes pragmas, #define's, and the register map.
+#include "lux_common_ps_fxc.h"
+
+// common flashlight function.
+#if PHONG == 1
+#include "lux_common_phong_flashlight.h"
+
+// We don't want any instructions from this to end up on Phong Combinations.
+static const bool bSeamless_Base		= false;
+static const bool bSeamless_Detail		= false;
+static const bool bSeamless_Bump		= false;
+static const bool bSeamless_EnvMapMask	= false;
+
+#else // else not doing phong
+
+#include "lux_common_flashlight_2.h"
+#define			bSeamless_Base					Bools[3]
+#define			bSeamless_Detail				Bools[4]
+#define			bSeamless_Bump					Bools[5]
+#define			bSeamless_EnvMapMask			Bools[6]
+
+#define OO_SQRT_3 0.57735025882720947f
+static const float3 LUX_BumpBasis[3] = {
+	float3(0.81649661064147949f, 0.0f, OO_SQRT_3),
+	float3(-0.40824833512306213f, 0.70710676908493042f, OO_SQRT_3),
+	float3(-0.40824821591377258f, -0.7071068286895752f, OO_SQRT_3)
+};
+static const float3 LUX_BumpBasisTranspose[3] = {
+	float3(0.81649661064147949f, -0.40824833512306213f, -0.40824833512306213f),
+	float3(0.0f, 0.70710676908493042f, -0.7071068286895752f),
+	float3(OO_SQRT_3, OO_SQRT_3, OO_SQRT_3)
+};
+
+#endif
+
+#if WORLDVERTEXTRANSITION
+
+#define			bSeamless_Secondary					Bools[7]
+#define			bHasBlendModulate					Bools[8]
+#define			bHasBlendModulateTransparency		Bools[9]
+#define			bHammerMode							Bools[10]
+//#define		bVertexColor						Bools[13]
+//#define		bVertexAlpha						Bools[14]
+//#define		bDepthToDestAlpha					Bools[15]
+const float4	g_BaseTexture2Tint_Factor			: register(c47);
+const float4	g_Detail2Tint_BlendFactor			: register(c48);
+const float4	g_SelfIllum2Tint_Factor				: register(c49);
+#define f1DetailBlendMode2							(g_DetailMode.y)
+
+sampler Sampler_BaseTexture2	: register(s1);
+sampler Sampler_NormalTexture2	: register(s3);
+sampler Sampler_EnvMapMask2		: register(s9);
+sampler Sampler_DetailTexture2	: register(s10);
+sampler Sampler_BlendModulate	: register(s12);
+#endif
+
+//===========================================================================//
+//	Everything Vertex Shader is outputting, enters here
+//===========================================================================//
+struct PS_INPUT
+{
+    float4	BaseDetailTexCoord		:	TEXCOORD0;
+	float4	WorldNormal				:	TEXCOORD2;	// .w = SeamlessWeights.x on WVT
+	float4	WorldPos				:	TEXCOORD3;	// .w = SeamlessWeights.y on WVT
+	float4	ProjPos					:	TEXCOORD4;	// .w = SeamlessWeights.z on WVT
+
+	float4	SeamlessWCoordinates	:	TEXCOORD7;	// UVW.z coordinates for Seamless Mapping
+#if WORLDVERTEXTRANSITION
+	float4	BlendMaskUVW_BlendScale	:	TEXCOORD1;	// UVW, BlendFactor
+	float4	NormalEMMTexCoord		:	TEXCOORD8;	// .xy not used on this shader because no normal mapping
+	float4	Base2Normal2TexCoord	:	TEXCOORD9;	// .zw not used on this shader because no normal mapping
+#else
+	float4	NormalEMMTexCoord		:	TEXCOORD1;	// on 1 instead of 8
+	float4	VertexColor				:	COLOR0;		// This is SeamlessWeights on LightMappedGeneric
+#endif
+};
+ 
+//===========================================================================//
+//	Rendering Start - Entry point
+//===========================================================================//
+float4 main(PS_INPUT i) : COLOR
+{
+	// Preparing a ton of floats that we need later because of Seamless mapping
+	//===========================================================================//
+	float4 f4BaseTexture;
+	float4 f4BaseTexture2;
+	float4 f4DetailTexture  = float4(0,0,0,0);;
+	float4 f4DetailTexture2 = float4(0,0,0,0);;
+	float4 f4NormalTexture;
+	float4 f4NormalTexture2;
+	float4 f4BlendModulateTexture;
+	float4 f4SeamlessWeights;
+	float3 f3BaseTextureUV	 = float3(i.BaseDetailTexCoord.xy,  i.SeamlessWCoordinates.x);
+	float3 f3BaseTexture2UV;
+	float3 f3NormalUV		 = float3(i.NormalEMMTexCoord.xy,	i.SeamlessWCoordinates.z);
+	float3 f3Normal2UV;
+	float3 f3DetailTextureUV = float3(i.BaseDetailTexCoord.zw,	i.SeamlessWCoordinates.y);
+	float3 f3BlendMaskUV;
+
+	//	Getting our PS_INPUT
+	//===========================================================================//
+	// .xyz's because WVT uses .w's for blendweights.
+    float3 f3FaceNormal			= i.WorldNormal.xyz;
+	float3 f3WorldPosition		= i.WorldPos.xyz;
+	float3 f3ProjectPosition	= i.ProjPos.xyz;
+
+	#if WORLDVERTEXTRANSITION
+		f3BaseTexture2UV  = float3(i.Base2Normal2TexCoord.xy, i.SeamlessWCoordinates.x);
+		f3Normal2UV		  = float3(i.Base2Normal2TexCoord.zw, i.SeamlessWCoordinates.z);
+		f3BlendMaskUV	  = i.BlendMaskUVW_BlendScale.xyz;
+		f4SeamlessWeights = float4(i.WorldNormal.w, i.WorldPos.w, i.ProjPos.w, 0.0f); // The function expects a float4 and will use only .xyz
+
+		if(bSeamless_Base)
+		{
+			if(bSeamless_Secondary) // Only the Second Texture is Seamless
+			{
+				f4BaseTexture	= tex2D(Sampler_BaseTexture, f3BaseTextureUV.xy);
+				f4BlendModulateTexture = tex2D(Sampler_BlendModulate, f3BlendMaskUV.xy);
+				f4BaseTexture2	= tex2D_Seamless(Sampler_BaseTexture2, f3BaseTexture2UV, f4SeamlessWeights);
+			}
+			else // Both Textures are Seamless ( bSeamless_Base )
+			{
+				f4BlendModulateTexture = tex2D_Seamless(Sampler_BlendModulate, f3BlendMaskUV, f4SeamlessWeights);
+				f4BaseTexture	= tex2D_Seamless(Sampler_BaseTexture, f3BaseTextureUV, f4SeamlessWeights);
+				f4BaseTexture2	= tex2D_Seamless(Sampler_BaseTexture2, f3BaseTexture2UV, f4SeamlessWeights);	
+			}
+		}
+		else
+		{
+			f4BlendModulateTexture = tex2D(Sampler_BlendModulate, f3BlendMaskUV.xy);
+			f4BaseTexture	= tex2D(Sampler_BaseTexture, f3BaseTextureUV.xy);
+			f4BaseTexture2	= tex2D(Sampler_BaseTexture2, f3BaseTexture2UV.xy);	
+		}
+
+		float	f1BlendFactor	= i.BlendMaskUVW_BlendScale.w;
+		// This fixed inverted blending in Hammer Preview
+		// NOTE: Hammer++ has a fix for this. You can disable that in the options menu of Hammer++
+		if(bHammerMode)
+				f1BlendFactor	= 1.0f - f1BlendFactor;
+
+		if(bHasBlendModulate)
+		{
+			float minb	  = saturate(f4BlendModulateTexture.g - f4BlendModulateTexture.r);
+			float maxb	  = saturate(f4BlendModulateTexture.g + f4BlendModulateTexture.r);
+			f1BlendFactor = smoothstep(minb,maxb,f1BlendFactor);
+		}
+	#else
+
+		// Used on LightmappedGeneric
+		f4SeamlessWeights	= i.VertexColor;
+
+		#if !PHONG
+		if(bSeamless_Base)
+		{
+			f4BaseTexture	= tex2D_Seamless(Sampler_BaseTexture, f3BaseTextureUV, f4SeamlessWeights);
+			
+		}
+		else
+		#endif
+		{
+			f4BaseTexture	= tex2D(Sampler_BaseTexture, f3BaseTextureUV.xy);	
+		}
+	#endif
+
+	#if WORLDVERTEXTRANSITION
+		#if BLENDTINTBYBASEALPHA
+	float3	f4TintedBaseTexture	= f4BaseTexture.xyz * f3BaseTextureTint;
+			f4TintedBaseTexture	= lerp(f4TintedBaseTexture, f3BaseTextureTint, f1BlendTintFactor);
+			f4BaseTexture.xyz	= lerp(f4BaseTexture.xyz, f4TintedBaseTexture, f4BaseTexture.w);
+
+	float3	f4TintedBaseTexture2= f4BaseTexture2.xyz * g_BaseTexture2Tint_Factor.xyz;
+			f4TintedBaseTexture2= lerp(f4TintedBaseTexture2, g_BaseTexture2Tint_Factor.xyz, g_BaseTexture2Tint_Factor.w);
+			f4BaseTexture2.xyz	= lerp(f4BaseTexture2.xyz, f4TintedBaseTexture2, f4BaseTexture2.w);
+		#else
+			f4BaseTexture.xyz *= f3BaseTextureTint;
+			f4BaseTexture2.xyz*= g_BaseTexture2Tint_Factor.xyz;
+		#endif
+
+		#if DETAILTEXTURE2
+			#if !PHONG
+			if(bSeamless_Detail)
+			{
+				f4DetailTexture2	= tex2D_Seamless(Sampler_DetailTexture2, f3DetailTextureUV, f4SeamlessWeights);	
+			}
+			else
+			#endif
+			{
+				f4DetailTexture2	= tex2D(Sampler_DetailTexture2, f3DetailTextureUV.xy);
+			}
+
+			int iDetailBlendMode2 = trunc(f1DetailBlendMode2);
+			f4DetailTexture2.xyz *= g_Detail2Tint_BlendFactor.xyz;
+			f4BaseTexture = TextureCombine( f4BaseTexture, f4DetailTexture2, iDetailBlendMode2, g_Detail2Tint_BlendFactor.w );
+		#endif
+	#else
+		#if BLENDTINTBYBASEALPHA
+		float3	f4TintedBaseTexture	= f4BaseTexture.xyz * f3BaseTextureTint;
+				f4TintedBaseTexture	= lerp(f4TintedBaseTexture, f3BaseTextureTint, f1BlendTintFactor);
+				f4BaseTexture.xyz	= lerp(f4BaseTexture.xyz, f4TintedBaseTexture, f4BaseTexture.w);
+		#else
+				f4BaseTexture.xyz *= f3BaseTextureTint;
+			#if DESATURATEBYBASEALPHA
+				float3	f3DesaturatedBaseAlpha = dot(f4BaseTexture.xyz, f3LumCoefficients);
+						f4BaseTexture.xyz = lerp(f4BaseTexture.xyz, f3DesaturatedBaseAlpha, f1DesaturationFactor);
+			#endif
+		#endif
+	#endif
+
+	#if DETAILTEXTURE
+		#if !PHONG
+		if(bSeamless_Detail)
+		{
+			f4DetailTexture	= tex2D_Seamless(Sampler_DetailTexture, f3DetailTextureUV, f4SeamlessWeights);	
+		}
+		else
+		#endif
+		{
+			f4DetailTexture	= tex2D(Sampler_DetailTexture, f3DetailTextureUV.xy);
+		}
+
+		int iDetailBlendMode = trunc(f1DetailBlendMode);
+		f4DetailTexture.xyz *= f3DetailTextureTint;
+		f4BaseTexture = TextureCombine( f4BaseTexture, f4DetailTexture, iDetailBlendMode, f1DetailBlendFactor );
+	#endif
+
+	#if BUMPMAPPED
+	// ShiroDkxtro2 :	We do this like the PBR Shader.
+	//					Tottery says this causes issues on smoothed models.
+	//					However, it means we can receive more things from the Vertex Shader
+	//					And I have not noticed any of such Issues.
+	float3 f3SurfaceNormal = normalize(f3FaceNormal);
+    float3 f3SurfaceTangent;
+    float3 f3SurfaceBase; 
+    float f1FlipSign;
+    float3x3 f3x3NormalBasis = Compute_Tangent_Frame(f3SurfaceNormal, f3WorldPosition, f3BaseTextureUV.xy , f3SurfaceTangent, f3SurfaceBase, f1FlipSign);
+
+		#if WORLDVERTEXTRANSITION
+			if(bSeamless_Bump)
+			{
+				if(bSeamless_Secondary) // Only the Second Texture is Seamless
+				{
+					f4NormalTexture	= tex2D(Sampler_NormalTexture, f3NormalUV.xy);
+					f4NormalTexture2= tex2D_Seamless(Sampler_NormalTexture2, f3Normal2UV, f4SeamlessWeights);
+				}
+				else // Both Textures are Seamless ( bSeamless_Base )
+				{
+					f4NormalTexture	= tex2D_Seamless(Sampler_NormalTexture, f3NormalUV, f4SeamlessWeights);	
+					f4NormalTexture2= tex2D_Seamless(Sampler_NormalTexture2, f3Normal2UV, f4SeamlessWeights);		
+				}
+			}
+			else
+			{
+				f4NormalTexture	= tex2D(Sampler_NormalTexture, f3NormalUV.xy);
+				f4NormalTexture2= tex2D(Sampler_NormalTexture2, f3Normal2UV.xy);		
+			}
+
+			#if !SSBUMP
+				f4NormalTexture.xyz	 = f4NormalTexture.xyz  * 2.0f - 1.0f;
+				f4NormalTexture2.xyz = f4NormalTexture2.xyz * 2.0f - 1.0f;
+
+				// Replicating Stock Behaviour : 
+				// Valve allows you to only have one bumpmap on a blended material, not blending with a second one
+				// On LUX we just bind the first NormalMap AGAIN, and then lerp it here. That wastes a TEXLD and LERP sadly, but it speeds up our compile times a lot
+				f4NormalTexture = lerp( f4NormalTexture, f4NormalTexture2, f1BlendFactor);	
+			#else
+				f4NormalTexture = lerp( f4NormalTexture, f4NormalTexture2, f1BlendFactor);	
+				f4NormalTexture.xyz = normalize( LUX_BumpBasis[0]*f4NormalTexture.x + LUX_BumpBasis[1]*f4NormalTexture.y + LUX_BumpBasis[2]*f4NormalTexture.z );
+			#endif
+
+		#else
+			#if !PHONG
+			if(bSeamless_Bump)
+			{
+				f4NormalTexture	= tex2D_Seamless(Sampler_NormalTexture, f3NormalUV, f4SeamlessWeights);	
+			}
+			else
+			#endif
+			{
+				f4NormalTexture	= tex2D(Sampler_NormalTexture, f3NormalUV.xy);	
+			}
+
+			#if !SSBUMP
+				f4NormalTexture.xyz	 = f4NormalTexture.xyz  * 2.0f - 1.0f;
+			#else
+				f4NormalTexture.xyz = normalize( LUX_BumpBasis[0]*f4NormalTexture.x + LUX_BumpBasis[1]*f4NormalTexture.y + LUX_BumpBasis[2]*f4NormalTexture.z );
+			#endif
+		#endif
+
+	// This is a modified WorldNormal
+	f3FaceNormal = normalize(mul(f4NormalTexture.xyz, f3x3NormalBasis));
+//	f4NormalTexture.y *= f1FlipSign; // Fixup TextureNormal for ambient lighting
+	#endif
+	
+//////////////////////////////////////////
+//		Render Phong Reflections		//
+//////////////////////////////////////////
+#if PHONG
+
+	// Need these for Fresnel Terms
+	    float3	f3ViewVector = normalize(g_EyePos.xyz - f3WorldPosition); // Lo
+		float	f1NdotV		 = saturate(dot(f3FaceNormal, f3ViewVector)); // cosLo
+
+	// This reproduces the same Fresnel as the stock Shaders.
+		float	f1FresnelPhong	 = 1.0f - f1NdotV;
+				f1FresnelPhong	*= f1FresnelPhong; // Square
+
+	// $PhongExponentTextureMask override below. Doing Normal/Base Alpha instead...
+		float	f1PhongMask = 1.0f;
+
+	// $PhongExponent. Will be our $PhongExponentFactor when doing $PhongExponentTexture
+		float	f1PhongExponent			= f1PhongExponentParam;
+
+	// .x=PhongExponent/149, .y=AlbedoTintMask, z.=PhongMask ? $PhongExponentTextureMask, .w=RimMask so default 1.0f
+		float4	f4PhongExponentTexture	= {0.0f, 1.0f, 1.0f, 1.0f};
+
+	// ShiroDkxtro2 Note :	See ACROHS_Defines.h and lux_common_ps_fxc.h for more information about luminance weights
+	//						Lum Coefficients are used to desaturate or to get the average luminance of rgb values
+		float3	f3SpecularTint = float3(1.0f,1.0f,1.0f);
+
+		if(bHasPhongAlbedoTint)
+		{
+			f3SpecularTint = f4BaseTexture.xyz * f1AlbedoTintBoost;
+		}
+
+	//---------------------------------------------------------------------------//
+	// Add Phongexponenttexture data if we have one.
+	// ShiroDkxtr2 :	My hope is that after this I will never be allowed to write Shadercode again.
+	//					What have those lunatic Valve Shaders forced upon me...
+	//---------------------------------------------------------------------------//
+	#if PHONGEXPONENTTEXTURE
+		// Get the Pixel from the Texture into our float4.
+			f4PhongExponentTexture = tex2D(Sampler_PhongExpTexture, f3BaseTextureUV.xy);
+	
+		// Note:	f1PhongExponent is $PhongExponentFactor when using a PhongExponentTexture.
+		//			Without $PhongExponentTexture it will be $PhongExponent.
+		//			So this is basically = Texture.x * 149.0f + 1.0f
+			f1PhongExponent *= f4PhongExponentTexture.x;
+			f1PhongExponent += 1.0f;
+	
+		// This allows for the use of both $PhongAlbedoTint and $BaseMapLuminancePhongMask (f3SpecularTint) at the same time.
+			if(bHasPhongAlbedoTint)
+			{
+				f3SpecularTint *= f4PhongExponentTexture.y;
+			}
+
+		// if $RimMask use the Alpha-Channel of the $PhongExponentTexture as the Mask.
+		// FLASHLIGHT = NO RIMLIGHT
+		/*
+			if(bHasRimLightMask)
+			{
+					f1RimLightMask = f4PhongExponentTexture.w;
+			}
+		*/
+
+		// If $PhongExponentTextureMask is set, use the blue channel as PhongMask so that Base and Normal can be used for other stuff.
+			if(bHasPhongExponentTextureMask)
+			{
+				
+					f1PhongMask =f4PhongExponentTexture.z;
+			}
+			else
+	#endif // End - PHONGEXPONENTTEXTURE
+			{
+				if(bHasBaseAlphaPhongMask)
+				{
+					f1PhongMask = f4BaseTexture.w;
+				}
+				else
+				{
+					f1PhongMask = f4NormalTexture.w;
+				}
+			}
+
+		// Invert the Mask if wanted.
+			if(bHasInvertedPhongMask)
+			{
+				f1PhongMask = 1.0f - f1PhongMask;
+			}
+		
+		// $PhongAlbedoTint was already applied. We can still apply luminance though.	
+			if(bHasBasemapLuminancePhongMask)
+			{
+				f3SpecularTint *= dot( f4BaseTexture.xyz, f3LumCoefficients );
+			}
+
+		f3SpecularTint *= f1PhongMask;
+
+	float3 f3Result = LUX_DoSpecular(f3FaceNormal, f3WorldPosition, f1NdotV, f3ViewVector,
+									f1PhongExponent, f1FresnelPhong, f3SpecularTint, f4BaseTexture.xyz,
+									FLASHLIGHTDEPTHFILTERMODE, FLASHLIGHTSHADOWS, f3ProjectPosition);
+#else // else no phong
+
+//////////////////////////////////////////////
+//		Render Non-Phong Reflections		//
+//////////////////////////////////////////////
+    float3 f3Result = f4BaseTexture.xyz * LUX_DoFlashlight(f3WorldPosition, f3FaceNormal, FLASHLIGHTDEPTHFILTERMODE, FLASHLIGHTSHADOWS, f3ProjectPosition, BUMPMAPPED);
+#endif
+
+    float f1Alpha = f4BaseTexture.a; // We just output the alpha
+	float f1FogFactor = CalcPixelFogFactor(PIXELFOGTYPE, g_FogParams, g_EyePos.xyz, f3WorldPosition, f3ProjectPosition.z);
+    return FinalOutput(float4(f3Result.xyz, f1Alpha), f1FogFactor, PIXELFOGTYPE, TONEMAP_SCALE_LINEAR);
+}

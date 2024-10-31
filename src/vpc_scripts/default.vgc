@@ -1,0 +1,32 @@
+//-----------------------------------------------------------------------------
+//	DEFAULT.VGC
+//
+//	Configurations for all Source(TM) Projects
+//-----------------------------------------------------------------------------
+
+////////////////
+// Game Names //
+////////////////
+
+$Games
+{
+	"TF2CLASSIC"
+}
+
+// Makes the VPC scripts work in the SDK's context
+$Conditional "SOURCESDK" "1"
+
+// Set which branch we are building out of.
+// This is one file we expect to be different between branches and so it must be merged carefully
+
+// Staging branch:
+//$Conditional STAGING_ONLY	"1"
+
+// rel/beta branch:
+//$Conditional BETA	"1"
+
+// TF2Classic
+//$Conditional STEAM_GROUP_CHECKPOINT		"1" [$TF2CLASSIC]
+
+$Include "vpc_scripts\projects.vgc"
+$Include "vpc_scripts\groups.vgc"

@@ -1,0 +1,3 @@
+[submodule "src/game/shared/sdk13-gigalib"]
+	path = src/game/shared/sdk13-gigalib
+	url = https://github.com/sapphonie/sdk13-gigalib

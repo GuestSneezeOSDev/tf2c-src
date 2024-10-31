@@ -1,0 +1,358 @@
+// shadertype=hlsl
+//========= ShiroDkxtro2's --ACROHS Ultimate Shaders Project-- ============//
+//
+//	Last Change :	22.05.2023 DMY
+//	Last Change :	24.05.2023 DMY
+//
+//	Purpose of this File :	Infected Shader, created from Valves GDC2010 presentation
+//							And user documentation ( largely mrfunreal )
+//
+//===========================================================================//
+
+//===========================================================================//
+//	Declare Static Combos
+//===========================================================================//
+// STATIC:	"FLASHLIGHT"				"0..1" // PROJECTEDTEXTURES 1 0
+// STATIC:	"FLASHLIGHTDEPTHFILTERMODE"	"0..2" // PROJECTEDTEXTURES 2 0
+// STATIC:	"BLENDTINTBYBASEALPHA"		"0..0" // BASETINTINGVIAALPHA 1 0
+// STATIC:	"DETAILTEXTURE"				"0..1" // DETAILTEXTURING 1 0
+
+//===========================================================================//
+//	Declare Dynamic Combos
+//===========================================================================//
+// DYNAMIC:	"PIXELFOGTYPE"				"0..1"
+// DYNAMIC:	"WRITEWATERFOGTODESTALPHA"	"0..1"
+// DYNAMIC: "NUM_LIGHTS"				"0..4"
+// DYNAMIC: "FLASHLIGHTSHADOWS"			"0..1"
+
+//===========================================================================//
+//	Skipping combos that are unneeded
+//	GIGA IMPORTANT :	The order of the STATIC:'s and the order of the skips
+//						will DRASTICALLY affect compiletime!
+//===========================================================================//
+// SKIP: ( $FLASHLIGHT == 0				&&	$FLASHLIGHTDEPTHFILTERMODE != 0 )	
+// SKIP: ( $PIXELFOGTYPE == 0			&&	$WRITEWATERFOGTODESTALPHA != 0 )
+
+// This is used to disable features automatically.
+#include "ACROHS_Defines.h"
+
+// This is NOT a Shader used on BRUSHES
+// #define BRUSH
+
+// This is a Shader used on MODELS
+#define MODEL
+
+// This Shaders USES Normalmaps
+#define NORMALTEXTURE
+
+//===========================================================================//
+//	Include Files ( and with them, function declarations )
+//===========================================================================//
+//	This has to be included first. It includes pragmas, #define's, and the register map.
+#include "lux_common_ps_fxc.h"
+// common lighting functions
+#if !FLASHLIGHT
+#include "lux_common_lighting.h"
+#endif
+// Declarations and Phong flashlight function.
+#include "lux_infected_fxc.h"
+				
+//===========================================================================//
+//	Everything Vertex Shader is outputting, enters here
+//===========================================================================//
+struct PS_INPUT
+{
+    float4	BaseDetailTexCoord		:	TEXCOORD0;
+	float4	NormalENMTexCoord		:	TEXCOORD1;
+	float3	WorldNormal				:	TEXCOORD2;
+	float3	WorldPos				:	TEXCOORD3;
+	float3	ProjPos					:	TEXCOORD4;
+	float4	LightmapTexCoord1And2	:	TEXCOORD5;
+	float4	LightAtten				:	TEXCOORD6;
+//	float4	StaticPropLighting		:	TEXCOORD7;
+	float4	VertexColor				:	COLOR0;
+};
+ 
+//===========================================================================//
+//	Rendering Start - Entry point
+//===========================================================================//
+float4 main(PS_INPUT i) : COLOR
+{
+	// .xyz's in case we need to pack something later
+    float3 f3FaceNormal			= i.WorldNormal.xyz;
+	float3 f3WorldPosition		= i.WorldPos.xyz;
+	float3 f3ProjectPosition	= i.ProjPos.xyz;
+
+	// Since this Shader is almost entirely undocumented lets go step by step as to how it should work
+	// Valves presentation about this shader will be used as a reference
+	// https://steamcdn-a.akamaihd.net/apps/valve/2010/GDC10_ShaderTechniquesL4D2.pdf
+	// First of all, the basetexture is sampled somehow, get the UV into a comprehensible float2
+	float2 f2BaseTextureUV = i.BaseDetailTexCoord.xy;
+
+//	#if DETAILTEXTURE
+//	float2 f2DetailTextureUV = i.BaseDetailTexCoord.zw;
+//	#endif
+
+	// Apparently the Shader can use Bumpmapping since The Last Stand so lets setup our TNG Matrix
+	// ShiroDkxtro2 :	We do this like the PBR Shader.
+	//					Tottery says this causes issues on smoothed models.
+	//					However, it means we can receive more things from the Vertex Shader
+	//					And I have not noticed any of such Issues.
+	float3 f3SurfaceNormal = normalize(f3FaceNormal);
+    float3 f3SurfaceTangent;
+    float3 f3SurfaceBase; 
+    float f1FlipSign;
+    float3x3 f3x3NormalBasis = Compute_Tangent_Frame(f3SurfaceNormal, f3WorldPosition, f2BaseTextureUV , f3SurfaceTangent, f3SurfaceBase, f1FlipSign);
+
+/*
+	RGB Channels have the following
+	R = Specularity, Detail - Mask(?)
+	G = Inversed Reflectivity, Blood Mask - color determined by VMT Parameter
+	B = Cloth / Skin Mask - They never overlap, so thats perfect.
+
+	RG is split into 4 corners, each corner has a variation
+	Variation listed as x,y. First go to the tree, then climb up.
+	Luckily the order shouldn't matter since its randomised.
+
+	Cloth/Skin isn't masked since we don't have overlapping UV maps.
+
+			Red Channel						Green Channel					Blue Channel
+	+------------+------------+		+------------+------------+		+-------------------------+
+	| Variation3 | Variation4 |		| Variation3 | Variation4 |		|						  |
+	|			 |			  |		|			 |			  |		|						  |
+	|			 |			  |		|			 |			  |		|						  |
+	|			 |			  |		|			 |			  |		|						  |
+	+------------+------------+		+------------+------------+		|		Cloth/Skin		  | GDC10 refers to this as clothing tint and skin tint
+	| Variation1 | Variation2 |		| Variation1 | Variation2 |		|						  |
+	|			 |			  |		|			 |			  |		|						  |
+	|			 |			  |		|			 |			  |		|						  |
+	|			 |			  |		|			 |			  |		|						  |
+	+------------+------------+		+------------+------------+		+-------------------------+
+*/
+
+	// So what we do is get the current pixel.
+	// According to slice 21 of the GDC10 talk, they have two texture lookups.
+	// The first is to get the luminance of the alpha channel.
+	float4	f4Packed			= tex2D(Sampler_BaseTexture, f2BaseTextureUV);
+	float	f1ClothToSkinFactor	= f4Packed.b; // Blue	Channel
+
+	// Unpack the Cloth/Skin Factors
+	// Slide 29 talks about "inverting" the thing first before leveling, then ignoring values above '127' I guess this is what is meant?
+	// If the value is >0.5 and we do *2.0f it will be above 1.0f, culled by the saturate.
+	// Thus no values above 127 will end up in the respective masks
+	float f1ClothMask	= 1.0f - saturate(f4Packed.b * 2.0f);
+	float f1SkinMask	= saturate(f1ClothToSkinFactor - 0.5f) * 2.0f;
+	float f1Luminance	= f4Packed.a; // Alpha	Channel
+
+/*
+	Heres where the magic begins.
+	A Gradient Texture is used to determine the final color.
+	Each Gradient Texture appears to be constructed like this...
+
+	16 pixel
+	^
+	|	+---------+---------------+
+	|	|  Skin1  |    Skin2      |
+	|	+---------+--+------------+
+	|	|	Cloth	 |	  Cloth2  |
+	|	+------------+------------+
+	|
+	+-------------------------------> 256 pixel
+	According to MRFunreal's tutorial on common infected
+	https://steamcommunity.com/sharedfiles/filedetails/?id=1567031703
+	the texture MUST be 256x16. Larger sizes won't work for some reason.
+	However these textures don't have to look like the above.
+	They can look like this too, by adding more segments and being clever with colors you can get more unique colors
+	And thus also have different materials, in funreals example, there is a unique palette for pants, shirt, shoes, paper, watch strip and watch face.
+
+	+---------+---------------+
+	|         |               |
+	+-----+---+--+------+-----+
+	|  1  |  2	 |	3   |  4  |
+	+-----+------+------+-----+
+	1.2.3.4 being pants, shirt, shoes, watch.
+	Users can add even more segments but increased amount of segments lead to decreased amount of resolution for each gradient.
+
+	Since we are including our common lighting functions we have access to the lightwarp-sampler already ( Sampler_LightWarpTexture )
+	According to the VDC article the lookup is calculated as such :
+	cloth = tex2D(Sampler, float2(luminosity, 1/32 + g_RandomisationA * 1/16))
+	skin  = tex2D(Sampler, float2(luminosity, 1/32 + g_RandomisationB * 1/16 + 0.5f))
+	Then the Blue Channel is used to linearly interpolate between the two.
+	lerp(cloth, skin, bluechannel)
+*/	
+	// 1/32 + g_RandomisationX * 1/16 (+ 0.5f) is precomputed on the parameter init for each random instance.
+	// That way its way cheaper to render this thing...
+	// TODO: According to the GDC10 talk, the 'cloth-tint mask' should be inverted first. But I don't see why..........
+	float2	f2ClothUV	 = float2(f1Luminance, g_RandomisationA);
+	float2	f2SkinUV	 = float2(f1Luminance, g_RandomisationB);
+	float3	f3ClothColor = tex2D(Sampler_LightWarpTexture, f2ClothUV);
+	float3	f3SkinColor	 = tex2D(Sampler_LightWarpTexture, f2SkinUV);
+
+	// This is where the blue channel comes into play.
+	// We lerp cloth/skin color using the blue channels values. This look like it should but there is probably an easier solution
+	float3	f3Result	= f1SkinMask * f3SkinColor + f3ClothColor * f1ClothMask;
+
+	// Now that we have the color lets get the other stuff...
+	// Texture is quartered so half both x and y
+	// We then add randomised XY Value on top. Which is in the 0-0.5f range. So we have 0,0 + ( 0.0, 0.0 || 0.0, 0.5 || 0.5, 0.0 || 0.5, 0.5 )
+	float2	f2AdjustedUV = f2BaseTextureUV * 0.5f + g_UVRandomisation;
+	// Sample the remaining two basetexture channels.
+	float2	f2Packed2		= tex2D(Sampler_BaseTexture, f2AdjustedUV).xy;
+	float	f1SpecDetail	= f2Packed2.x; // Red	Channel
+	float	f1BloodEyeGlow	= f2Packed2.y; // Green	Channel 
+
+	// Detail is only on the upper half of the color, we get it later
+	// Note that 0 on red would be full specularity, so we have to invert it.
+	float f1SpecularMask	= 1.0f - saturate(f1SpecDetail * 2.0f);
+
+	// We would want to do -0.5f but we still need to get it in the correct range, so this should be faster.
+	float f1BloodMask		= saturate(f1BloodEyeGlow * 2.0f - 1.0f);
+
+	// According to slice 33, they smoothstep the "blood patterns" ( our blood mask )
+	// This would explain the vec2 parameter that comes with the shader, since smoothstep takes 3 inputs!
+	// Default values for BloodMaskRange are float2(0.0f , 1.0f)
+	// This also looks correct, in-game
+	f1BloodMask = smoothstep(f2BloodMaskRange.x,f2BloodMaskRange.y, f1BloodMask); // Smoothstep is around 7-8 instructions so this is kinda expensive
+
+	// "Retroreflectivity" mask. ( This is such a hackhackhack, its almost funny )
+	// If there isn't a comment above it in the l4d2 source that is like
+	// "oh real retroreflectivity is too expensive!! lets just multiply it by 100"
+	// then I will be SERIOUSLY disappointed
+	float f1ReflectiveMask	= saturate(f1BloodEyeGlow * 2.0f);
+	
+	// Apply the detailtexture
+	#if DETAILTEXTURE
+		float f1DetailMask	 = saturate(f1SpecDetail * 2.0f - 1.0f);
+		// Float4, we use the specular mask from the alpha later ( See slide 32 )
+		float4 DetailTexture = tex2D(Sampler_DetailTexture, f2BaseTextureUV);
+
+		// They don't really specify what kind of detailtexture operation they are doing...
+		// This looks correct, so I'll roll with that.
+		f3Result.rgb = lerp(f3Result.rgb, DetailTexture.rgb, f1DetailMask);
+
+		// Alpha stores the SpecularMask
+		// They again don't really tell how they are combined so this is just my first guess
+		float f1DA = DetailTexture.a;
+		f1SpecularMask = lerp(f1SpecularMask, float3(f1DA, f1DA, f1DA), f1DetailMask);
+	#endif
+
+	// We add blood at the very end, that's what the gdc10 slice 43 shows
+	// We can't just multiply by f3Bloodtint*f1BloodMask, because Green and Blue are black, so you would remove all the results we made.
+	// If you lerp them however you can increase red value by gradually decreasing white values.
+	f3Result = lerp(f3Result, f3BloodTint, f1BloodMask);
+
+	// Lets construct ourselves a phong exponent
+	float f1PhongExponent = f1DefaultExponent;
+	// We have 5 different sources for PhongExpontent
+	// That also have the following priority
+	// 1. $defaultphongexponent
+	// 2. ClothExponent
+	// 3. DetailExponent
+	// 4. SkinExponent
+	// 5. BloodExponent
+	// So lets go and mask them, in that order.
+	// We already have default one so lets see if we can lerp our things on top :)
+	// This shader loves lerp it appears...
+	// ShiroDkxtro2 TODO : Convert f3Result to f4Result then store the PhongExponent ontop!
+	// That should decrease instruction count, if the compiler doesn't do it automatically already
+
+	// Lets start with cloth
+	f1PhongExponent = lerp(f1PhongExponent, f1ClothExponent, f1ClothMask);
+
+	// then skin..
+	f1PhongExponent = lerp(f1PhongExponent, f1SkinExponent, f1SkinMask);
+
+//	#if DETAILTEXTURE
+//	f1PhongExponent = lerp(f1PhongExponent, f1DetailExponent, f1DetailMask);
+//	#endif
+
+	// Blood.
+	f1PhongExponent = lerp(f1PhongExponent, f1BloodExponent, f1BloodMask);
+
+	// While we are at blood, it also gets a stronger phongboost!
+	float f1SpecularBoost = lerp(f1PhongBoost, f1BloodPhongBoost, f1BloodMask);
+
+		
+	// We will need this for lighting
+	float3	f3NormalTexture	 = tex2D(Sampler_NormalTexture, f2BaseTextureUV).xyz * 2.0f - 1.0f;
+			f3NormalTexture	*= 2.0f; // adjust the strength..
+			f3FaceNormal	 = normalize(mul(f3NormalTexture, f3x3NormalBasis));
+
+	float3	f3ViewVector	 = normalize(g_EyePos.xyz - f3WorldPosition); // Lo
+	float	f1NdotV			 = dot(f3FaceNormal, f3ViewVector); // cosLo
+
+	// This reproduces the same Fresnel as the stock Shaders.
+	float	f1FresnelPhong = 1.0f - f1NdotV;
+	f1FresnelPhong *= f1FresnelPhong; // Square
+
+#if !FLASHLIGHT
+
+	// We reuse the phong function from our VertexLitGeneric Shader, but its slightly modified. In this case the basetexture will be f3Result
+	f3Result = LUX_InfectedSpecular(f3FaceNormal, f3WorldPosition, i.LightAtten, f1NdotV, f3ViewVector, f1PhongExponent,
+									f1FresnelPhong, float3(f1SpecularMask,f1SpecularMask,f1SpecularMask), f3Result, f1SpecularBoost);
+
+#else
+	f3Result = LUX_DoSpecular(f3FaceNormal, f3WorldPosition, f1NdotV, f3ViewVector, f1PhongExponent,
+	f1FresnelPhong, f1SpecularMask * f1SpecularBoost, f3Result, FLASHLIGHTDEPTHFILTERMODE, FLASHLIGHTSHADOWS, f3ProjectPosition);
+
+//	f3Result *= LUX_DoFlashlight(f3WorldPosition, f3FaceNormal, true);
+#endif
+
+	//===========================================================================//
+	//	Rendering, everything that renders when not under a flashlight 
+	//===========================================================================//
+
+    float f1FogFactor = CalcPixelFogFactor(PIXELFOGTYPE, g_FogParams, g_EyePos.xyz, f3WorldPosition, f3ProjectPosition.z);
+
+// This is important because for some reason SKIP's don't want to work.
+#if !FLASHLIGHT
+
+#if WRITEWATERFOGTODESTALPHA && (PIXELFOGTYPE == PIXEL_FOG_TYPE_HEIGHT)
+    float f1Alpha = f1FogFactor;
+#else
+    float f1Alpha = 1.0f;
+#endif // WRITEWATERFOGTODESTALPHA && (PIXELFOGTYPE == PIXEL_FOG_TYPE_HEIGHT)
+
+#else
+    float f1Alpha = 0.0f;
+#endif // !FLASHLIGHT
+
+	// Cannot do bDepthToDestAlpha && (WRITEWATERFOGTODESTALPHA == 0)
+	// Boolean Registers may only be used in If-Statements!!!
+    bool bWriteDepthToAlpha = (WRITEWATERFOGTODESTALPHA == 0);
+	if(!bDepthToDestAlpha)
+	{
+		bWriteDepthToAlpha = false;
+	}
+
+#if !FLASHLIGHT
+	int Debugging = trunc(f1Debug);
+	if(Debugging == 1)
+	{
+		f3Result = float3(f1FresnelPhong,f1FresnelPhong,f1FresnelPhong); // Fresnel
+	}
+
+	if(Debugging == 2)
+	{
+		f3Result = f3Result * f3PhongTint * f1SpecularBoost * f1SpecularMask; // no idea
+	}
+
+	if(Debugging == 3)
+	{
+		f3Result = float3(f1SpecularMask,f1SpecularMask,f1SpecularMask); // Should be b/w
+	}
+
+	if(Debugging == 4)
+	{
+		f3Result = float3(f1SpecularBoost,f1SpecularBoost,f1SpecularBoost); // Should be white
+	}
+
+	if(Debugging == 6)
+	{
+		f3Result = 2 * f3NormalTexture * f1NdotV - f3ViewVector;
+	}
+#endif
+
+// Result must be f4 because of DetailTextureCombine
+    return FinalOutput(float4(f3Result.xyz, f1Alpha), f1FogFactor, PIXELFOGTYPE, TONEMAP_SCALE_LINEAR, bWriteDepthToAlpha, f3ProjectPosition.z);
+}
